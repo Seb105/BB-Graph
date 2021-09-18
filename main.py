@@ -1,23 +1,27 @@
-from math import pi, sqrt, atan2, cos, sin
+from math import pi, sqrt, atan2, cos, sin, radians, degrees
 
 RAD = 1.571
 AIR_DENSITY = 1.225
 BB_DIAMETER = 6e-3
 BB_RADIUS = BB_DIAMETER/2
-BB_JOULE = 1
 INITIAL_POSITION = [0, 1.8]
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
 TIMESTEP = 1/100
 GRAVITY = 9.81
 
+
 def calc_vortex_strength(angular_velocity: float) -> float:
-    return 2*pi*BB_RADIUS**2*angular_velocity*1.2
+    return 2*pi*BB_RADIUS**2*angular_velocity
 
 
-def get_intiial_velocity(mass: float) -> float:
+def get_intiial_velocity(mass: float, energy: float) -> float:
+    angle = radians(0)
+    velocity = sqrt(energy/(0.5*mass))
+    velocity_x = cos(angle) * velocity
+    velocity_y = sin(angle) * velocity
     # calculates velocity according to mass and energy
-    return [sqrt(BB_JOULE/(0.5*mass)), 0]
+    return [velocity_x, velocity_y]
 
 
 def get_initial_hop_angular_velocity(component_velocity: float, mass: float) -> float:
@@ -58,16 +62,17 @@ def calc_drag(velocity: float, mass: float) -> float:
 def update_position(position: list, velocity: list) -> list:
     return [position[0] + velocity[0]*TIMESTEP, position[1] + velocity[1]*TIMESTEP]
 
-def update_velocity(velocity, deltas):
+
+def update_velocity(velocity: list, deltas: list) -> list:
     for delta in deltas:
         velocity[0] += delta[0]*TIMESTEP
         velocity[1] += delta[1]*TIMESTEP
-    velocity[1] += -GRAVITY * TIMESTEP # Gravity
+    velocity[1] += -GRAVITY * TIMESTEP  # Gravity
     return velocity
 
 
-def calc_bb(mass: float):
-    velocity = get_intiial_velocity(mass)
+def calc_bb(mass: float, energy: float):
+    velocity = get_intiial_velocity(mass, energy)
     position = INITIAL_POSITION.copy()
     angular_velocity = get_initial_hop_angular_velocity(velocity[0], mass)
     flight_time = 0
@@ -80,12 +85,13 @@ def calc_bb(mass: float):
         flight_time += TIMESTEP
         results.append([flight_time, position, velocity])
     #[print(result) for result in results]
-    return [mass, flight_time, position[0]]
+    return [mass, energy, round(flight_time, 2), round(position[0], 2)]
 
 
 def main():
-    for mass in (0.0002, 0.00025, 0.00028, 0.0003, 0.0004):
-        print(calc_bb(mass))
+    for energy in (1, 1.13, 1.48, 1.87):
+        for mass in (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005):
+            print(calc_bb(mass, energy))
 
 
 main()

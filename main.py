@@ -107,13 +107,27 @@ def get_plot_label(subject, result):
         label = f'{round(result["energy"], 2)}J'
     return label + fps
 
+def plot_graphs(series, datapoint, results, subject):
+    if subject == "J":
+        directory = f'energy/{datapoint}J.png'
+        trajectory_title = f'Trajectories at {datapoint}J for various bb sizes'
+        time_distance_title = f'Time-distane graphs at {datapoint}J for various bb sizes'
+        print(f'Plotting graphs for {datapoint}J bbs')
+    else:
+        mass_g = round(datapoint*1000, 2)
+        directory = f'mass/{mass_g}g.png'
+        trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
+        time_distance_title = f'Time-distane graphs for {mass_g}g bbs at various energy levels'
+        print(f'Plotting graphs for {mass_g}g bbs')
+    plot_trajectory(series, trajectory_title, subject, directory)
+    plot_time_distance(series, time_distance_title, subject, directory)
     
-def plot_trajectory(results, title, subject, directory):
+def plot_trajectory(series, title, subject, directory):
     fig, ax = plt.subplots()
     ax.set_title(title)
-    ax.set_ylabel('BB Height')
-    ax.set_xlabel('BB Distance')
-    for result in results:
+    ax.set_ylabel('bb Height (ft)')
+    ax.set_xlabel('bb Distance (ft)')
+    for result in series:
         points = result["points"]
         positions_x = [point[1][0]*M_TO_FEET for point in points]
         positions_y = [point[1][1]*M_TO_FEET for point in points]
@@ -123,39 +137,29 @@ def plot_trajectory(results, title, subject, directory):
     ax.legend(loc='lower left')
     directory = "trajectory/"+directory
     fig.savefig(directory)
+    plt.close()
 
-def plot_time_to_target(results, title, subject, directory):
+def plot_time_distance(series, title, subject, directory):
     fig, ax = plt.subplots()
     ax.set_title(title)
-    ax.set_ylabel('BB Height')
-    ax.set_xlabel('BB Distance')
-    for result in results:
+    ax.set_ylabel('Distance Travelled (ft)')
+    ax.set_xlabel('Time (s)')
+    for result in series:
         points = result["points"]
-        positions_x = [point[1][0]*M_TO_FEET for point in points]
-        positions_y = [point[1][1]*M_TO_FEET for point in points]
-        trajectory = ax.plot(positions_x, positions_y)
+        time = [point[0] for point in points]
+        distance = [point[1][0]*M_TO_FEET for point in points]
+        trajectory = ax.plot(time, distance)
         label = get_plot_label(subject, result)
         trajectory[0].set_label(label)
-    ax.legend(loc='lower left')
-    directory = "trajectory/"+directory
+    ax.legend(loc='lower right')
+    directory = "time_distance/"+directory
     # if not os.path.exists(directory):
     #     os.makedirs(directory)
     fig.savefig(directory)
+    plt.close()
 
-def plot_energy_trajectories(energy, results):
-    series = [result for result in results if result["energy"] == energy]
-    trajectory_title = f'Trajectories at {energy}J for various bb sizes'
-    subject = "J"
-    directory = f'energy/{energy}J.png'
-    plot_trajectory(series, trajectory_title, subject, directory)
 
-def plot_mass_trajectories(mass, results):
-    series = [result for result in results if result["mass"] == mass]
-    mass_g = round(mass*1000, 2)
-    trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
-    subject = "M"
-    directory = f'mass/{mass_g}g.png'
-    plot_trajectory(series, trajectory_title, subject, directory)
+
 
 def main():
     results = []
@@ -168,9 +172,11 @@ def main():
             print(result["summary"])
     #test_results = [result for result in results if result["energy"] == 1]
     for energy in energies:
-        plot_energy_trajectories(energy, results)
+        series = [result for result in results if result["energy"] == energy]
+        plot_graphs(series, energy, results, "J")
     for mass in masses:
-        plot_mass_trajectories(mass, results)
+        series = [result for result in results if result["mass"] == mass]
+        plot_graphs(series, mass, results, "M")
 
 
 main()

@@ -1,6 +1,8 @@
 from math import pi, sqrt, atan2, cos, sin, radians, degrees
 import matplotlib.pyplot as plt
 import os
+from concurrent.futures import ProcessPoolExecutor
+from random import randint, seed
 
 RAD = 1.571
 AIR_DENSITY = 1.225
@@ -70,7 +72,7 @@ def update_velocity(velocity: list, deltas: list) -> list:
         velocity[0] += delta[0]*TIMESTEP
         velocity[1] += delta[1]*TIMESTEP
     velocity[1] += -GRAVITY * TIMESTEP  # Gravity
-    return velocity
+    return velocity.copy()
 
 
 def calc_bb(mass: float, energy: float) -> dict:
@@ -86,7 +88,7 @@ def calc_bb(mass: float, energy: float) -> dict:
         position = update_position(position, velocity)
         flight_time += TIMESTEP
         points.append((flight_time, position, velocity))
-    #[print(result) for result in results]
+    # [print(result) for result in points]
     #return [mass, energy, round(flight_time, 2), round(position[0], 2)]
     return {
         "mass" : mass,
@@ -107,23 +109,27 @@ def get_plot_label(subject, result) -> str:
         label = f'{round(result["energy"], 2)}J'
     return label + fps
 
-def plot_graphs(series, datapoint, results, subject):
+def plot_graphs(series, datapoint, subject):
     if subject == "J":
         directory = f'energy/{datapoint}J.png'
         trajectory_title = f'Trajectories at {datapoint}J for various bb sizes'
-        time_distance_title = f'Time-distane graphs at {datapoint}J for various bb sizes'
+        time_distance_title = f'Time-distance graphs at {datapoint}J for various bb sizes'
+        time_velocity_title = f'Time-velocity graphs at {datapoint}J for various bb sizes'
         print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
         directory = f'mass/{mass_g}g.png'
         trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
-        time_distance_title = f'Time-distane graphs for {mass_g}g bbs at various energy levels'
+        time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
+        time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
         print(f'Plotting graphs for {mass_g}g bbs')
     plot_trajectory(series, trajectory_title, subject, directory)
     plot_time_distance(series, time_distance_title, subject, directory)
+    plot_velocity_time(series, time_velocity_title, subject, directory)
     
 def plot_trajectory(series, title, subject, directory):
-    fig, ax = plt.subplots()
+    fig = plt.figure(dpi = 200)
+    ax = fig.add_subplot()
     ax.set_title(title)
     ax.set_ylabel('bb Height (ft)')
     ax.set_xlabel('bb Distance (ft)')
@@ -131,37 +137,65 @@ def plot_trajectory(series, title, subject, directory):
         points = result["points"]
         positions_x = [point[1][0]*M_TO_FEET for point in points]
         positions_y = [point[1][1]*M_TO_FEET for point in points]
-        trajectory = ax.plot(positions_x, positions_y)
-        label = get_plot_label(subject, result)
-        trajectory[0].set_label(label)
+        trajectory = ax.plot(positions_x, positions_y)[0]
+        trajectory.set_lw(0.75)
+        trajectory.set_ls('--')
+        trajectory.set_label(get_plot_label(subject, result))
     ax.legend(loc='lower left')
     directory = "trajectory/"+directory
     fig.savefig(directory)
     plt.close()
 
 def plot_time_distance(series, title, subject, directory):
-    fig, ax = plt.subplots()
+    fig = plt.figure(dpi = 200, figsize = (10, 5))
+    ax = fig.add_subplot()
     ax.set_title(title)
     ax.set_ylabel('Distance Travelled (ft)')
     ax.set_xlabel('Time (s)')
-    for result in series:
+    for i, result in enumerate(series):
         points = result["points"]
         time = [point[0] for point in points]
         distance = [point[1][0]*M_TO_FEET for point in points]
-        trajectory = ax.plot(time, distance)
-        label = get_plot_label(subject, result)
-        trajectory[0].set_label(label)
+        trajectory = ax.plot(time, distance)[0]
+        trajectory.set_lw(0.75)
+        trajectory.set_ls('--')
+        trajectory.set_zorder(len(series)-i)
+        trajectory.set_label(get_plot_label(subject, result))
     ax.legend(loc='lower right')
     directory = "time_distance/"+directory
-    # if not os.path.exists(directory):
-    #     os.makedirs(directory)
     fig.savefig(directory)
     plt.close()
 
-
-
+def plot_velocity_time(series, title, subject, directory):
+    fig = plt.figure(dpi = 200)
+    ax = fig.add_subplot()
+    ax.set_title(title)
+    ax.set_ylabel('bb velocity (fps)')
+    ax.set_xlabel('Time elapsed (s)')
+    for result in series:
+        points = result["points"]
+        time = [point[0] for point in points]
+        velocity = [point[2][0]*M_TO_FEET for point in points]
+        trajectory = ax.plot(time, velocity)[0]
+        trajectory.set_lw(0.75)
+        trajectory.set_ls('--')
+        trajectory.set_label(get_plot_label(subject, result))
+    ax.legend(loc='upper right')
+    directory = "velocity/"+directory
+    fig.savefig(directory)
+    plt.close()
 
 def main():
+    for directory in (
+        "trajectory/energy/",
+        "trajectory/mass/",
+        "time_distance/energy/",
+        "time_distance/mass/",
+        "velocity/energy/",
+        "velocity/mass/",
+    ):
+        if not os.path.isdir(directory):
+            os.makedirs(directory)
     results = []
     energies = (1, 1.138, 1.486, 1.881, 2.322)
     masses = (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
@@ -170,12 +204,16 @@ def main():
             result = calc_bb(mass, energy)
             results.append(result)
             print(result["summary"])
-    for energy in energies:
-        series = [result for result in results if result["energy"] == energy]
-        plot_graphs(series, energy, results, "J")
-    for mass in masses:
-        series = [result for result in results if result["mass"] == mass]
-        plot_graphs(series, mass, results, "M")
+    with ProcessPoolExecutor() as pe:
+        for energy in energies:
+            series = [result for result in results if result["energy"] == energy]
+            #plot_graphs(series, energy, results, "J")
+            pe.submit(plot_graphs, series, energy, "J")
+        for mass in masses:
+            series = [result for result in results if result["mass"] == mass]
+            #plot_graphs(series, mass, results, "M")
+            pe.submit(plot_graphs, series, mass, "M")
+    # plot_graphs([results[0]], 1, "J")
 
-
-main()
+if __name__ == "__main__":
+    main()

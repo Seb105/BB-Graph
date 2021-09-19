@@ -73,7 +73,7 @@ def update_velocity(velocity: list, deltas: list) -> list:
     return velocity
 
 
-def calc_bb(mass: float, energy: float):
+def calc_bb(mass: float, energy: float) -> dict:
     velocity = get_intiial_velocity(mass, energy)
     position = INITIAL_POSITION.copy()
     angular_velocity = get_initial_hop_angular_velocity(velocity[0], mass)
@@ -96,10 +96,10 @@ def calc_bb(mass: float, energy: float):
         "points" : points
     }
 
-def get_bb_fps(result):
+def get_bb_fps(result: dict) -> str:
     return f' ({round(sqrt(result["energy"]/(0.5*result["mass"])) * M_TO_FEET)}fps)'
 
-def get_plot_label(subject, result):
+def get_plot_label(subject, result) -> str:
     fps = get_bb_fps(result)
     if subject == "J":
         label = f'{round(result["mass"]*1000, 2)}g'
@@ -170,7 +170,6 @@ def main():
             result = calc_bb(mass, energy)
             results.append(result)
             print(result["summary"])
-    #test_results = [result for result in results if result["energy"] == 1]
     for energy in energies:
         series = [result for result in results if result["energy"] == energy]
         plot_graphs(series, energy, results, "J")

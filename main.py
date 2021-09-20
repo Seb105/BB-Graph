@@ -16,6 +16,7 @@ TIMESTEP = 1/100
 GRAVITY = 9.81
 M_TO_FEET = 3.28084
 
+
 def calc_vortex_strength(angular_velocity: float) -> float:
     return 2*pi*BB_RADIUS**2*angular_velocity
 
@@ -44,12 +45,12 @@ def update_angular_velocity(mass, angular_velocity):
     shear_force = 2*pi*AIR_DYNAMIC_VISCOSITY*angular_velocity*BB_DIAMETER*BB_RADIUS
     shear_torque = BB_RADIUS * shear_force
     shear_delta = (shear_torque / moment_of_inerta) * TIMESTEP
-    
-    friction_torque = pi*angular_velocity**2*BB_RADIUS**4*BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
+
+    friction_torque = pi*angular_velocity**2*BB_RADIUS**4 * \
+        BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
     friction_delta = (friction_torque / moment_of_inerta) * TIMESTEP
 
     return angular_velocity - shear_delta - friction_delta
-
 
 
 def calc_magnus_effect(velocity: list, mass: float, angular_velocity: float) -> float:
@@ -81,11 +82,12 @@ def update_position(position: list, velocity: list) -> list:
 
 
 def update_velocity(velocity: list, deltas: list) -> list:
+    velocity = velocity.copy()
     for delta in deltas:
         velocity[0] += delta[0]*TIMESTEP
         velocity[1] += delta[1]*TIMESTEP
     velocity[1] += -GRAVITY * TIMESTEP  # Gravity
-    return velocity.copy()
+    return velocity
 
 
 def calc_bb(mass: float, energy: float) -> dict:
@@ -94,6 +96,7 @@ def calc_bb(mass: float, energy: float) -> dict:
     angular_velocity = get_initial_hop_angular_velocity(velocity[0], mass)
     flight_time = 0
     points = []
+    points.append((flight_time, position, velocity))
     while position[1] > 0:
         delta_magnus = calc_magnus_effect(velocity, mass, angular_velocity)
         delta_drag = calc_drag(velocity, mass)
@@ -103,17 +106,19 @@ def calc_bb(mass: float, energy: float) -> dict:
         flight_time += TIMESTEP
         points.append((flight_time, position, velocity))
     # [print(result) for result in points]
-    #return [mass, energy, round(flight_time, 2), round(position[0], 2)]
+    # return [mass, energy, round(flight_time, 2), round(position[0], 2)]
     return {
-        "mass" : mass,
-        "energy" : energy,
-        "time" : flight_time,
-        "summary" : (mass, energy, round(flight_time, 2), round(position[0], 2)),
-        "points" : points
+        "mass": mass,
+        "energy": energy,
+        "time": flight_time,
+        "summary": (mass, energy, round(flight_time, 2), round(position[0], 2)),
+        "points": points
     }
+
 
 def get_bb_fps(result: dict) -> str:
     return f' ({round(sqrt(result["energy"]/(0.5*result["mass"])) * M_TO_FEET)}fps)'
+
 
 def get_plot_label(subject, result) -> str:
     fps = get_bb_fps(result)
@@ -122,6 +127,7 @@ def get_plot_label(subject, result) -> str:
     else:
         label = f'{round(result["energy"], 2)}J'
     return label + fps
+
 
 def plot_graphs(series, datapoint, subject):
     if subject == "J":
@@ -140,10 +146,12 @@ def plot_graphs(series, datapoint, subject):
     plot_trajectory(series, trajectory_title, subject, directory)
     plot_time_distance(series, time_distance_title, subject, directory)
     plot_velocity_time(series, time_velocity_title, subject, directory)
-    
+
+
 def plot_trajectory(series, title, subject, directory):
-    fig = plt.figure(dpi = 200)
+    fig = plt.figure(dpi=200)
     ax = fig.add_subplot()
+    ax.grid(b=True)
     ax.set_title(title)
     ax.set_ylabel('bb Height (ft)')
     ax.set_xlabel('bb Distance (ft)')
@@ -160,8 +168,9 @@ def plot_trajectory(series, title, subject, directory):
     fig.savefig(directory)
     plt.close()
 
+
 def plot_time_distance(series, title, subject, directory):
-    fig = plt.figure(dpi = 200, figsize = (10, 5))
+    fig = plt.figure(dpi=200, figsize=(10, 5))
     ax = fig.add_subplot()
     ax.set_title(title)
     ax.set_ylabel('Distance Travelled (ft)')
@@ -180,8 +189,9 @@ def plot_time_distance(series, title, subject, directory):
     fig.savefig(directory)
     plt.close()
 
+
 def plot_velocity_time(series, title, subject, directory):
-    fig = plt.figure(dpi = 200)
+    fig = plt.figure(dpi=200)
     ax = fig.add_subplot()
     ax.set_title(title)
     ax.set_ylabel('bb velocity (fps)')
@@ -195,10 +205,13 @@ def plot_velocity_time(series, title, subject, directory):
         trajectory.set_ls('--')
         trajectory.set_zorder(len(series)-i)
         trajectory.set_label(get_plot_label(subject, result))
+    ax.set_ylim(ymin=-0.1, ymax=500)
+    ax.set_xlim(xmin=-0.1, xmax=1.5)
     ax.legend(loc='upper right')
     directory = "velocity/"+directory
     fig.savefig(directory)
     plt.close()
+
 
 def main():
     for directory in (
@@ -213,12 +226,13 @@ def main():
             os.makedirs(directory)
     results = []
     energies = (1, 1.138, 1.486, 1.881, 2.322)
-    masses = (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
+    masses = (0.0002, 0.00025, 0.00028, 0.0003,
+              0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
     for energy in energies:
         for mass in masses:
             result = calc_bb(mass, energy)
             results.append(result)
-            print(result["summary"])
+            # print(result["summary"])
     with ProcessPoolExecutor() as pe:
         for energy in energies:
             series = [result for result in results if result["energy"] == energy]
@@ -228,7 +242,8 @@ def main():
             series = [result for result in results if result["mass"] == mass]
             #plot_graphs(series, mass, results, "M")
             pe.submit(plot_graphs, series, mass, "M")
-    # plot_graphs([result for result in results if result["energy"] == 1], 1, "J")
+    # plot_graphs([result for result in results if result["energy"] == 1.138], 1.138, "J")
+
 
 if __name__ == "__main__":
     main()

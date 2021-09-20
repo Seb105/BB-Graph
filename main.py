@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 RAD = 1.571
 AIR_DENSITY = 1.225
 AIR_DYNAMIC_VISCOSITY = 1.81e-5
-BB_DIAMETER = 6e-3
+BB_DIAMETER = 5.95e-3
 BB_RADIUS = BB_DIAMETER/2
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
@@ -15,7 +15,8 @@ TIMESTEP = 1/100
 GRAVITY = 9.81
 M_TO_FEET = 3.28084
 INITIAL_POSITION = [0, 5/M_TO_FEET]
-
+ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
+MASSES = (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -39,12 +40,21 @@ class BB_Class:
     @classmethod
     def magnus_spin_mod(cls, mass, energy) -> float:
         # Arbitrary values to get a rise of about 1ft due to magnus effect.
-        base = 1.25
-        mass_weight = 5
-        energy_weight = 1/4
-        mass_mod = mass_weight*((0.5-mass*1000)**2)
-        energy_mod = (energy-1)*energy_weight
-        return base + mass_mod + energy_mod
+        
+        # Old 1
+        base = 1
+        energy_mod =    remap(energy,   min(ENERGIES),  max(ENERGIES),  1.0, 1.1)
+        mass_mod =      remap(mass,     min(MASSES),    max(MASSES),    1.8, 1.4)
+        print(mass, mass_mod)
+        # Old 2
+        # global_weight = 1.25
+        # mass_weight = global_weight * 4
+        # energy_weight = global_weight * (1/8)
+        # mass_mod = (mass_weight*(0.5-mass*1000)**2)
+        # energy_mod = energy_weight*((energy-0.9)**2)
+        # print(mass*1000, mass_mod, energy, energy_mod)
+        return base * energy_mod * mass_mod
+
 
     @classmethod
     def get_intial_velocity(cls, mass: float, energy: float) -> list:
@@ -59,7 +69,8 @@ class BB_Class:
     def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float, energy: float) -> float:
         # Gets initial hop spin for straight flight
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-        magnus_mod = BB_Class.magnus_spin_mod(mass, energy) # Seems to decently capitalise on magnus effect
+        # Seems to decently capitalise on magnus effect
+        magnus_mod = BB_Class.magnus_spin_mod(mass, energy)
         F = mass * GRAVITY * magnus_mod
         G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
         angular_velocity = G/(2*pi*BB_RADIUS**2)
@@ -91,7 +102,8 @@ class BB_Class:
     def calc_drag(self) -> list:
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
-        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA # https://en.wikipedia.org/wiki/Drag_equation
+        # https://en.wikipedia.org/wiki/Drag_equation
+        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
         # F = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
         delta_speed = F/self.mass
         delta_X = sin(direction) * delta_speed
@@ -123,8 +135,6 @@ class BB_Class:
             self.update_position()
             self.flight_time += TIMESTEP
             points.append((self.flight_time, self.position, self.velocity))
-        # [print(result) for result in points]
-        # return [mass, energy, round(flight_time, 2), round(position[0], 2)]
         return {
             "mass": self.mass,
             "energy": self.initial_energy,
@@ -154,14 +164,14 @@ def plot_graphs(series, datapoint, subject):
         trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
         time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb weights'
         time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb weights'
-        print(f'Plotting graphs for {datapoint}J bbs')
+        # print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
         directory = f'mass/{mass_g}g.png'
         trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
         time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
         time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
-        print(f'Plotting graphs for {mass_g}g bbs')
+        # print(f'Plotting graphs for {mass_g}g bbs')
     plot_trajectory(fig, series, trajectory_title, subject)
     plot_time_distance(fig, series, time_distance_title, subject)
     plot_time_velocity(fig, series, time_velocity_title, subject)
@@ -236,20 +246,18 @@ def main():
         if not os.path.isdir(directory):
             os.makedirs(directory)
     results = []
-    energies = (1.0, 1.138, 1.486, 1.881, 2.322)
-    masses = (0.0002, 0.00025, 0.00028, 0.0003,
-              0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
-    for energy in energies:
-        for mass in masses:
+
+    for energy in ENERGIES:
+        for mass in MASSES:
             result = BB_Class(mass, energy).run_sim()
             results.append(result)
             # print(result["summary"])
     with ProcessPoolExecutor() as pe:
-        for energy in energies:
+        for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]
             #plot_graphs(series, energy, results, "J")
             pe.submit(plot_graphs, series, energy, "J")
-        for mass in masses:
+        for mass in MASSES:
             series = [result for result in results if result["mass"] == mass]
             #plot_graphs(series, mass, results, "M")
             pe.submit(plot_graphs, series, mass, "M")

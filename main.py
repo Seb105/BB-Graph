@@ -17,103 +17,106 @@ GRAVITY = 9.81
 M_TO_FEET = 3.28084
 
 
-def calc_vortex_strength(angular_velocity: float) -> float:
-    return 2*pi*BB_RADIUS**2*angular_velocity
+class BB_Class:
+    def __init__(self, mass, energy):
+        self.mass = mass
+        self.initial_energy = energy
+        self.velocity = BB_Class.get_intial_velocity(mass, energy)
+        self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(
+            self.velocity[0], mass)
+        self.position = INITIAL_POSITION.copy()
+        self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
+        self.flight_time = 0
 
+    def vortex_strength(self) -> float:
+        return 2*pi*BB_RADIUS**2*self.angular_velocity
 
-def get_intiial_velocity(mass: float, energy: float) -> float:
-    angle = radians(0)
-    velocity = sqrt(energy/(0.5*mass))
-    velocity_x = cos(angle) * velocity
-    velocity_y = sin(angle) * velocity
-    # calculates velocity according to mass and energy
-    return [velocity_x, velocity_y]
+    @classmethod
+    def get_intial_velocity(cls, mass: float, energy: float) -> float:
+        angle = radians(0)
+        velocity = sqrt(energy/(0.5*mass))
+        velocity_x = cos(angle) * velocity
+        velocity_y = sin(angle) * velocity
+        # calculates velocity according to mass and energy
+        return [velocity_x, velocity_y]
 
+    @classmethod
+    def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float) -> float:
+        # Gets initial hop spin for straight flight
+        # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
+        F = mass * GRAVITY * 1.25
+        G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
+        angular_velocity = G/(2*pi*BB_RADIUS**2)
+        return angular_velocity
 
-def get_initial_hop_angular_velocity(component_velocity: float, mass: float) -> float:
-    # Gets initial hop spin for straight flight
-    # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-    F = mass * GRAVITY * 1.25
-    G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
-    angular_velocity = G/(2*pi*BB_RADIUS**2)
-    return angular_velocity
+    def update_angular_velocity(self):
+        # https://physics.stackexchange.com/questions/304742/angular-drag-on-body
+        shear_force = 2*pi*AIR_DYNAMIC_VISCOSITY * \
+            self.angular_velocity*BB_DIAMETER*BB_RADIUS
+        shear_torque = BB_RADIUS * shear_force
+        shear_delta = (shear_torque / self.moment_of_inerta) * TIMESTEP
 
+        friction_torque = pi*self.angular_velocity**2*BB_RADIUS**4 * \
+            BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
+        friction_delta = (friction_torque / self.moment_of_inerta) * TIMESTEP
+        self.angular_velocity = self.angular_velocity - shear_delta - friction_delta
 
-def update_angular_velocity(mass, angular_velocity):
-    # https://physics.stackexchange.com/questions/304742/angular-drag-on-body
-    moment_of_inerta = (2/5)*mass*BB_RADIUS**2
-    shear_force = 2*pi*AIR_DYNAMIC_VISCOSITY*angular_velocity*BB_DIAMETER*BB_RADIUS
-    shear_torque = BB_RADIUS * shear_force
-    shear_delta = (shear_torque / moment_of_inerta) * TIMESTEP
+    def calc_magnus_effect(self) -> float:
+        G = self.vortex_strength()
+        speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+        direction = atan2(self.velocity[0], self.velocity[1]) - RAD
+        F = AIR_DENSITY*speed*G*BB_DIAMETER
+        delta_speed = F/self.mass
+        delta_X = sin(direction) * delta_speed
+        delta_Y = cos(direction) * delta_speed
+        #print("Magnus delta ", delta_X, delta_Y, velocity)
+        return [delta_X, delta_Y]
 
-    friction_torque = pi*angular_velocity**2*BB_RADIUS**4 * \
-        BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
-    friction_delta = (friction_torque / moment_of_inerta) * TIMESTEP
+    def calc_drag(self) -> float:
+        # https://www.engineeringtoolbox.com/drag-coefficient-d_627.html
+        speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+        direction = atan2(self.velocity[0], self.velocity[1])
+        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
+        delta_speed = F/self.mass
+        delta_X = sin(direction) * delta_speed
+        delta_Y = cos(direction) * delta_speed
+        #print("Drag delta ", delta_X, delta_Y, velocity)
+        return [-delta_X, -delta_Y]
 
-    return angular_velocity - shear_delta - friction_delta
+    def update_position(self) -> list:
+        self.position = [self.position[0] + self.velocity[0] *
+                         TIMESTEP, self.position[1] + self.velocity[1]*TIMESTEP]
 
+    def update_velocity(self) -> list:
+        deltas = [
+            self.calc_magnus_effect(),
+            self.calc_drag()
+        ]
+        velocity = self.velocity.copy()
+        for delta in deltas:
+            velocity[0] += delta[0]*TIMESTEP
+            velocity[1] += delta[1]*TIMESTEP
+        velocity[1] += -GRAVITY * TIMESTEP  # Gravity
+        self.velocity = velocity
 
-def calc_magnus_effect(velocity: list, mass: float, angular_velocity: float) -> float:
-    G = calc_vortex_strength(angular_velocity)
-    speed = sqrt(velocity[0]**2 + velocity[1]**2)
-    direction = atan2(velocity[0], velocity[1]) - RAD
-    F = AIR_DENSITY*speed*G*BB_DIAMETER
-    delta_speed = F/mass
-    delta_X = sin(direction) * delta_speed
-    delta_Y = cos(direction) * delta_speed
-    #print("Magnus delta ", delta_X, delta_Y, velocity)
-    return [delta_X, delta_Y]
-
-
-def calc_drag(velocity: float, mass: float) -> float:
-    # https://www.engineeringtoolbox.com/drag-coefficient-d_627.html
-    speed = sqrt(velocity[0]**2 + velocity[1]**2)
-    direction = atan2(velocity[0], velocity[1])
-    F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
-    delta_speed = F/mass
-    delta_X = sin(direction) * delta_speed
-    delta_Y = cos(direction) * delta_speed
-    #print("Drag delta ", delta_X, delta_Y, velocity)
-    return [-delta_X, -delta_Y]
-
-
-def update_position(position: list, velocity: list) -> list:
-    return [position[0] + velocity[0]*TIMESTEP, position[1] + velocity[1]*TIMESTEP]
-
-
-def update_velocity(velocity: list, deltas: list) -> list:
-    velocity = velocity.copy()
-    for delta in deltas:
-        velocity[0] += delta[0]*TIMESTEP
-        velocity[1] += delta[1]*TIMESTEP
-    velocity[1] += -GRAVITY * TIMESTEP  # Gravity
-    return velocity
-
-
-def calc_bb(mass: float, energy: float) -> dict:
-    velocity = get_intiial_velocity(mass, energy)
-    position = INITIAL_POSITION.copy()
-    angular_velocity = get_initial_hop_angular_velocity(velocity[0], mass)
-    flight_time = 0
-    points = []
-    points.append((flight_time, position, velocity))
-    while position[1] > 0:
-        delta_magnus = calc_magnus_effect(velocity, mass, angular_velocity)
-        delta_drag = calc_drag(velocity, mass)
-        angular_velocity = update_angular_velocity(mass, angular_velocity)
-        velocity = update_velocity(velocity, [delta_magnus, delta_drag])
-        position = update_position(position, velocity)
-        flight_time += TIMESTEP
-        points.append((flight_time, position, velocity))
-    # [print(result) for result in points]
-    # return [mass, energy, round(flight_time, 2), round(position[0], 2)]
-    return {
-        "mass": mass,
-        "energy": energy,
-        "time": flight_time,
-        "summary": (mass, energy, round(flight_time, 2), round(position[0], 2)),
-        "points": points
-    }
+    def run_sim(self) -> dict:
+        points = []
+        points.append((self.flight_time, self.position, self.velocity))
+        while self.position[1] > 0:
+            self.update_angular_velocity()
+            self.update_velocity()
+            self.update_position()
+            self.flight_time += TIMESTEP
+            points.append((self.flight_time, self.position, self.velocity))
+        # [print(result) for result in points]
+        # return [mass, energy, round(flight_time, 2), round(position[0], 2)]
+        return {
+            "mass": self.mass,
+            "energy": self.initial_energy,
+            "time": self.flight_time,
+            "summary": (self.mass, self.initial_energy, round(self.flight_time, 2), round(self.position[0], 2)),
+            "points": points
+        }
 
 
 def get_bb_fps(result: dict) -> str:
@@ -230,7 +233,7 @@ def main():
               0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
     for energy in energies:
         for mass in masses:
-            result = calc_bb(mass, energy)
+            result = BB_Class(mass, energy).run_sim()
             results.append(result)
             # print(result["summary"])
     with ProcessPoolExecutor() as pe:

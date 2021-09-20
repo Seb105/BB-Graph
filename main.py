@@ -1,20 +1,24 @@
-from math import pi, sqrt, atan2, cos, sin, radians, degrees
+from math import pi, sqrt, atan2, cos, sin, radians
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 import os
 from concurrent.futures import ProcessPoolExecutor
-from random import randint, seed
 
 RAD = 1.571
 AIR_DENSITY = 1.225
 AIR_DYNAMIC_VISCOSITY = 1e-5
 BB_DIAMETER = 6e-3
 BB_RADIUS = BB_DIAMETER/2
-INITIAL_POSITION = [0, 1.8]
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
 TIMESTEP = 1/100
 GRAVITY = 9.81
 M_TO_FEET = 3.28084
+INITIAL_POSITION = [0, 5/M_TO_FEET]
+
+
+def remap(x, in_min, in_max, out_min, out_max):
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
 
 class BB_Class:
@@ -23,7 +27,7 @@ class BB_Class:
         self.initial_energy = energy
         self.velocity = BB_Class.get_intial_velocity(mass, energy)
         self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(
-            self.velocity[0], mass)
+            self.velocity[0], mass, energy)
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         self.flight_time = 0
@@ -32,7 +36,7 @@ class BB_Class:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
 
     @classmethod
-    def get_intial_velocity(cls, mass: float, energy: float) -> float:
+    def get_intial_velocity(cls, mass: float, energy: float) -> list:
         angle = radians(0)
         velocity = sqrt(energy/(0.5*mass))
         velocity_x = cos(angle) * velocity
@@ -41,10 +45,13 @@ class BB_Class:
         return [velocity_x, velocity_y]
 
     @classmethod
-    def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float) -> float:
+    def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float, energy: float) -> float:
         # Gets initial hop spin for straight flight
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-        F = mass * GRAVITY * 1.25
+        # Seems to decently capitalise on magnus effect
+        mass_mod = 1.25 + (3*(0.5-mass*1000))**2 + (energy-1)/5
+        print(mass, mass_mod)
+        F = mass * GRAVITY * mass_mod
         G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
         angular_velocity = G/(2*pi*BB_RADIUS**2)
         return angular_velocity
@@ -61,7 +68,7 @@ class BB_Class:
         friction_delta = (friction_torque / self.moment_of_inerta) * TIMESTEP
         self.angular_velocity = self.angular_velocity - shear_delta - friction_delta
 
-    def calc_magnus_effect(self) -> float:
+    def calc_magnus_effect(self):
         G = self.vortex_strength()
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1]) - RAD
@@ -69,10 +76,10 @@ class BB_Class:
         delta_speed = F/self.mass
         delta_X = sin(direction) * delta_speed
         delta_Y = cos(direction) * delta_speed
-        #print("Magnus delta ", delta_X, delta_Y, velocity)
+        # print("Magnus delta ", delta_X, delta_Y, velocity)
         return [delta_X, delta_Y]
 
-    def calc_drag(self) -> float:
+    def calc_drag(self) -> list:
         # https://www.engineeringtoolbox.com/drag-coefficient-d_627.html
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
@@ -83,11 +90,11 @@ class BB_Class:
         #print("Drag delta ", delta_X, delta_Y, velocity)
         return [-delta_X, -delta_Y]
 
-    def update_position(self) -> list:
+    def update_position(self):
         self.position = [self.position[0] + self.velocity[0] *
                          TIMESTEP, self.position[1] + self.velocity[1]*TIMESTEP]
 
-    def update_velocity(self) -> list:
+    def update_velocity(self):
         deltas = [
             self.calc_magnus_effect(),
             self.calc_drag()
@@ -133,11 +140,12 @@ def get_plot_label(subject, result) -> str:
 
 
 def plot_graphs(series, datapoint, subject):
+    fig = plt.figure(dpi=200, figsize=(20, 15), tight_layout=True)
     if subject == "J":
         directory = f'energy/{datapoint}J.png'
-        trajectory_title = f'Trajectories at {datapoint} joule for various bb sizes'
-        time_distance_title = f'Time-distance graphs at {datapoint} joule for various bb sizes'
-        time_velocity_title = f'Time-velocity graphs at {datapoint} joule for various bb sizes'
+        trajectory_title = f'Trajectories at {datapoint} joules for various bb sizes'
+        time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb sizes'
+        time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb sizes'
         print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
@@ -146,35 +154,41 @@ def plot_graphs(series, datapoint, subject):
         time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
         time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
         print(f'Plotting graphs for {mass_g}g bbs')
-    plot_trajectory(series, trajectory_title, subject, directory)
-    plot_time_distance(series, time_distance_title, subject, directory)
-    plot_velocity_time(series, time_velocity_title, subject, directory)
+    plot_trajectory(fig, series, trajectory_title, subject)
+    plot_time_distance(fig, series, time_distance_title, subject)
+    plot_time_velocity(fig, series, time_velocity_title, subject)
+    fig.savefig(directory)
 
 
-def plot_trajectory(series, title, subject, directory):
-    fig = plt.figure(dpi=200)
-    ax = fig.add_subplot()
+def configure_line(z, line, subject, result):
+    line.set_lw(2)
+    line.set_alpha(0.5)
+    line.set_ls('--')
+    line.set_label(get_plot_label(subject, result))
+    line.set_zorder(z)
+
+
+def plot_trajectory(fig, series, title, subject):
+    ax = fig.add_subplot(2, 1, 1)
     ax.grid(b=True)
     ax.set_title(title)
-    ax.set_ylabel('bb Height (ft)')
-    ax.set_xlabel('bb Distance (ft)')
-    for result in series:
+    ax.set_ylabel('Height (ft)')
+    ax.set_xlabel('Distance (ft)')
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(25))
+    for i, result in enumerate(series):
         points = result["points"]
         positions_x = [point[1][0]*M_TO_FEET for point in points]
         positions_y = [point[1][1]*M_TO_FEET for point in points]
         trajectory = ax.plot(positions_x, positions_y)[0]
-        trajectory.set_lw(0.75)
-        trajectory.set_ls('--')
-        trajectory.set_label(get_plot_label(subject, result))
+        configure_line(i, trajectory, subject, result)
+    ax.set_xlim(xmin=0, xmax=275)
+    ax.set_ylim(ymin=0, ymax=6.5)
     ax.legend(loc='lower left')
-    directory = "trajectory/"+directory
-    fig.savefig(directory)
-    plt.close()
 
 
-def plot_time_distance(series, title, subject, directory):
-    fig = plt.figure(dpi=200, figsize=(10, 5))
-    ax = fig.add_subplot()
+def plot_time_distance(fig, series, title, subject):
+    ax = fig.add_subplot(2, 2, 3)
+    ax.grid(b=True)
     ax.set_title(title)
     ax.set_ylabel('Distance Travelled (ft)')
     ax.set_xlabel('Time (s)')
@@ -183,47 +197,33 @@ def plot_time_distance(series, title, subject, directory):
         time = [point[0] for point in points]
         distance = [point[1][0]*M_TO_FEET for point in points]
         trajectory = ax.plot(time, distance)[0]
-        trajectory.set_lw(0.75)
-        trajectory.set_ls('--')
-        trajectory.set_zorder(len(series)-i)
-        trajectory.set_label(get_plot_label(subject, result))
+        configure_line(len(series)-i, trajectory, subject, result)
+    ax.set_xlim(xmin=0, xmax=1.6)
+    ax.set_ylim(ymin=0, ymax=275)
     ax.legend(loc='lower right')
-    directory = "time_distance/"+directory
-    fig.savefig(directory)
-    plt.close()
 
 
-def plot_velocity_time(series, title, subject, directory):
-    fig = plt.figure(dpi=200)
-    ax = fig.add_subplot()
+def plot_time_velocity(fig, series, title, subject):
+    ax = fig.add_subplot(2, 2, 4)
+    ax.grid(b=True)
     ax.set_title(title)
-    ax.set_ylabel('bb velocity (fps)')
-    ax.set_xlabel('Time elapsed (s)')
+    ax.set_ylabel('Velocity (fps)')
+    ax.set_xlabel('Time (s)')
     for i, result in enumerate(series):
         points = result["points"]
         time = [point[0] for point in points]
         velocity = [point[2][0]*M_TO_FEET for point in points]
         trajectory = ax.plot(time, velocity)[0]
-        trajectory.set_lw(0.75)
-        trajectory.set_ls('--')
-        trajectory.set_zorder(len(series)-i)
-        trajectory.set_label(get_plot_label(subject, result))
-    ax.set_ylim(ymin=-0.1, ymax=500)
-    ax.set_xlim(xmin=-0.1, xmax=1.5)
+        configure_line(len(series)-i, trajectory, subject, result)
+    ax.set_xlim(xmin=0, xmax=1.6)
+    ax.set_ylim(ymin=0, ymax=500)
     ax.legend(loc='upper right')
-    directory = "velocity/"+directory
-    fig.savefig(directory)
-    plt.close()
 
 
 def main():
     for directory in (
-        "trajectory/energy/",
-        "trajectory/mass/",
-        "time_distance/energy/",
-        "time_distance/mass/",
-        "velocity/energy/",
-        "velocity/mass/",
+        "energy",
+        "mass",
     ):
         if not os.path.isdir(directory):
             os.makedirs(directory)

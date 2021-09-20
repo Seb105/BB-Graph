@@ -45,7 +45,6 @@ class BB_Class:
         base = 1
         energy_mod =    remap(energy,   min(ENERGIES),  max(ENERGIES),  1.0, 1.1)
         mass_mod =      remap(mass,     min(MASSES),    max(MASSES),    1.8, 1.4)
-        print(mass, mass_mod)
         # Old 2
         # global_weight = 1.25
         # mass_weight = global_weight * 4

@@ -42,11 +42,11 @@ def get_initial_hop_angular_velocity(component_velocity: float, mass: float) -> 
 def calc_magnus_effect(velocity: list, mass: float, angular_velocity: float) -> float:
     G = calc_vortex_strength(angular_velocity)
     speed = sqrt(velocity[0]**2 + velocity[1]**2)
-    direction = atan2(velocity[0], velocity[1])
+    direction = atan2(velocity[0], velocity[1]) - RAD
     F = AIR_DENSITY*speed*G*BB_DIAMETER
     delta_speed = F/mass
-    delta_X = cos(direction) * delta_speed
-    delta_Y = sin(direction) * delta_speed
+    delta_X = sin(direction) * delta_speed
+    delta_Y = cos(direction) * delta_speed
     #print("Magnus delta ", delta_X, delta_Y, velocity)
     return [delta_X, delta_Y]
 
@@ -213,7 +213,7 @@ def main():
             series = [result for result in results if result["mass"] == mass]
             #plot_graphs(series, mass, results, "M")
             pe.submit(plot_graphs, series, mass, "M")
-    # plot_graphs([results[0]], 1, "J")
+    # plot_graphs([result for result in results if result["energy"] == 1], 1, "J")
 
 if __name__ == "__main__":
     main()

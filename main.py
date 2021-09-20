@@ -6,6 +6,7 @@ from random import randint, seed
 
 RAD = 1.571
 AIR_DENSITY = 1.225
+AIR_DYNAMIC_VISCOSITY = 1e-5
 BB_DIAMETER = 6e-3
 BB_RADIUS = BB_DIAMETER/2
 INITIAL_POSITION = [0, 1.8]
@@ -31,12 +32,24 @@ def get_intiial_velocity(mass: float, energy: float) -> float:
 def get_initial_hop_angular_velocity(component_velocity: float, mass: float) -> float:
     # Gets initial hop spin for straight flight
     # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-    # G     = F/(diameter * air density * velocity)
-    # omega = G/(2*pi*r^2)
-    F = mass * GRAVITY
+    F = mass * GRAVITY * 1.25
     G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
     angular_velocity = G/(2*pi*BB_RADIUS**2)
     return angular_velocity
+
+
+def update_angular_velocity(mass, angular_velocity):
+    # https://physics.stackexchange.com/questions/304742/angular-drag-on-body
+    moment_of_inerta = (2/5)*mass*BB_RADIUS**2
+    shear_force = 2*pi*AIR_DYNAMIC_VISCOSITY*angular_velocity*BB_DIAMETER*BB_RADIUS
+    shear_torque = BB_RADIUS * shear_force
+    shear_delta = (shear_torque / moment_of_inerta) * TIMESTEP
+    
+    friction_torque = pi*angular_velocity**2*BB_RADIUS**4*BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
+    friction_delta = (friction_torque / moment_of_inerta) * TIMESTEP
+
+    return angular_velocity - shear_delta - friction_delta
+
 
 
 def calc_magnus_effect(velocity: list, mass: float, angular_velocity: float) -> float:
@@ -84,6 +97,7 @@ def calc_bb(mass: float, energy: float) -> dict:
     while position[1] > 0:
         delta_magnus = calc_magnus_effect(velocity, mass, angular_velocity)
         delta_drag = calc_drag(velocity, mass)
+        angular_velocity = update_angular_velocity(mass, angular_velocity)
         velocity = update_velocity(velocity, [delta_magnus, delta_drag])
         position = update_position(position, velocity)
         flight_time += TIMESTEP
@@ -112,9 +126,9 @@ def get_plot_label(subject, result) -> str:
 def plot_graphs(series, datapoint, subject):
     if subject == "J":
         directory = f'energy/{datapoint}J.png'
-        trajectory_title = f'Trajectories at {datapoint}J for various bb sizes'
-        time_distance_title = f'Time-distance graphs at {datapoint}J for various bb sizes'
-        time_velocity_title = f'Time-velocity graphs at {datapoint}J for various bb sizes'
+        trajectory_title = f'Trajectories at {datapoint} joule for various bb sizes'
+        time_distance_title = f'Time-distance graphs at {datapoint} joule for various bb sizes'
+        time_velocity_title = f'Time-velocity graphs at {datapoint} joule for various bb sizes'
         print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
@@ -172,13 +186,14 @@ def plot_velocity_time(series, title, subject, directory):
     ax.set_title(title)
     ax.set_ylabel('bb velocity (fps)')
     ax.set_xlabel('Time elapsed (s)')
-    for result in series:
+    for i, result in enumerate(series):
         points = result["points"]
         time = [point[0] for point in points]
         velocity = [point[2][0]*M_TO_FEET for point in points]
         trajectory = ax.plot(time, velocity)[0]
         trajectory.set_lw(0.75)
         trajectory.set_ls('--')
+        trajectory.set_zorder(len(series)-i)
         trajectory.set_label(get_plot_label(subject, result))
     ax.legend(loc='upper right')
     directory = "velocity/"+directory

@@ -151,9 +151,9 @@ def plot_graphs(series, datapoint, subject):
     fig = plt.figure(dpi=200, figsize=(20, 15), tight_layout=True)
     if subject == "J":
         directory = f'energy/{datapoint}J.png'
-        trajectory_title = f'Trajectories at {datapoint} joules for various bb sizes'
-        time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb sizes'
-        time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb sizes'
+        trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
+        time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb weights'
+        time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb weights'
         print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
@@ -236,7 +236,7 @@ def main():
         if not os.path.isdir(directory):
             os.makedirs(directory)
     results = []
-    energies = (1, 1.138, 1.486, 1.881, 2.322)
+    energies = (1.0, 1.138, 1.486, 1.881, 2.322)
     masses = (0.0002, 0.00025, 0.00028, 0.0003,
               0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
     for energy in energies:

@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 RAD = 1.571
 AIR_DENSITY = 1.225
-AIR_DYNAMIC_VISCOSITY = 1e-5
+AIR_DYNAMIC_VISCOSITY = 1.81e-5
 BB_DIAMETER = 6e-3
 BB_RADIUS = BB_DIAMETER/2
 SPHERE_DRAG_COEF = 0.47
@@ -30,10 +30,21 @@ class BB_Class:
             self.velocity[0], mass, energy)
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
+        # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
 
     def vortex_strength(self) -> float:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
+
+    @classmethod
+    def magnus_spin_mod(cls, mass, energy) -> float:
+        # Arbitrary values to get a rise of about 1ft due to magnus effect.
+        base = 1.25
+        mass_weight = 5
+        energy_weight = 1/4
+        mass_mod = mass_weight*((0.5-mass*1000)**2)
+        energy_mod = (energy-1)*energy_weight
+        return base + mass_mod + energy_mod
 
     @classmethod
     def get_intial_velocity(cls, mass: float, energy: float) -> list:
@@ -48,10 +59,8 @@ class BB_Class:
     def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float, energy: float) -> float:
         # Gets initial hop spin for straight flight
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-        # Seems to decently capitalise on magnus effect
-        mass_mod = 1.25 + (3*(0.5-mass*1000))**2 + (energy-1)/5
-        print(mass, mass_mod)
-        F = mass * GRAVITY * mass_mod
+        magnus_mod = BB_Class.magnus_spin_mod(mass, energy) # Seems to decently capitalise on magnus effect
+        F = mass * GRAVITY * magnus_mod
         G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
         angular_velocity = G/(2*pi*BB_RADIUS**2)
         return angular_velocity
@@ -80,14 +89,13 @@ class BB_Class:
         return [delta_X, delta_Y]
 
     def calc_drag(self) -> list:
-        # https://www.engineeringtoolbox.com/drag-coefficient-d_627.html
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
-        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
+        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA # https://en.wikipedia.org/wiki/Drag_equation
+        # F = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
         delta_speed = F/self.mass
         delta_X = sin(direction) * delta_speed
         delta_Y = cos(direction) * delta_speed
-        #print("Drag delta ", delta_X, delta_Y, velocity)
         return [-delta_X, -delta_Y]
 
     def update_position(self):
@@ -245,7 +253,6 @@ def main():
             series = [result for result in results if result["mass"] == mass]
             #plot_graphs(series, mass, results, "M")
             pe.submit(plot_graphs, series, mass, "M")
-    # plot_graphs([result for result in results if result["energy"] == 1.138], 1.138, "J")
 
 
 if __name__ == "__main__":

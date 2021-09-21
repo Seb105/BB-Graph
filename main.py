@@ -11,16 +11,21 @@ BB_DIAMETER = 5.95e-3
 BB_RADIUS = BB_DIAMETER/2
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
-TIMESTEP = 1/100
+TIMESTEP = 1/1000
 GRAVITY = 9.81
-M_TO_FEET = 3.28084
-INITIAL_POSITION = [0, 5/M_TO_FEET]
+FEET_PER_METRE = 3.28084
+INITIAL_POSITION = [0, 5/FEET_PER_METRE]
 ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES = (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
+def m2ft(x):
+    return x*FEET_PER_METRE
+
+def ft2m(x):
+    return x/FEET_PER_METRE
 
 class BB_Class:
     def __init__(self, mass, energy):
@@ -33,6 +38,13 @@ class BB_Class:
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
+
+    def reynolds_number(self):
+        flow_speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+        return (AIR_DENSITY*flow_speed*BB_DIAMETER)/AIR_DYNAMIC_VISCOSITY
+
+    def drag_coef(self):
+        return 24/self.reynolds_number()
 
     def vortex_strength(self) -> float:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
@@ -70,10 +82,10 @@ class BB_Class:
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
         # Seems to decently capitalise on magnus effect
         magnus_mod = BB_Class.magnus_spin_mod(mass, energy)
-        F = mass * GRAVITY * magnus_mod
+        F = mass * GRAVITY
         G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
         angular_velocity = G/(2*pi*BB_RADIUS**2)
-        return angular_velocity
+        return angular_velocity * magnus_mod
 
     def update_angular_velocity(self):
         # https://physics.stackexchange.com/questions/304742/angular-drag-on-body
@@ -110,8 +122,10 @@ class BB_Class:
         return [-delta_X, -delta_Y]
 
     def update_position(self):
-        self.position = [self.position[0] + self.velocity[0] *
-                         TIMESTEP, self.position[1] + self.velocity[1]*TIMESTEP]
+        self.position = [
+            self.position[0] + self.velocity[0] * TIMESTEP, 
+            self.position[1] + self.velocity[1] * TIMESTEP
+        ]
 
     def update_velocity(self):
         deltas = [
@@ -144,7 +158,7 @@ class BB_Class:
 
 
 def get_bb_fps(result: dict) -> str:
-    return f' ({round(sqrt(result["energy"]/(0.5*result["mass"])) * M_TO_FEET)}fps)'
+    return f' ({round(sqrt(result["energy"]/(0.5*result["mass"])) * FEET_PER_METRE)}fps)'
 
 
 def get_plot_label(subject, result) -> str:
@@ -194,12 +208,16 @@ def plot_trajectory(fig, series, title, subject):
     ax.xaxis.set_major_locator(ticker.MultipleLocator(25))
     for i, result in enumerate(series):
         points = result["points"]
-        positions_x = [point[1][0]*M_TO_FEET for point in points]
-        positions_y = [point[1][1]*M_TO_FEET for point in points]
+        positions_x = [point[1][0]*FEET_PER_METRE for point in points]
+        positions_y = [point[1][1]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(positions_x, positions_y)[0]
         configure_line(i, trajectory, subject, result)
     ax.set_xlim(xmin=0, xmax=275)
     ax.set_ylim(ymin=0, ymax=6.5)
+    secxax = ax.secondary_xaxis('top', functions=(ft2m, m2ft))
+    secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
+    secxax.set_xlabel("Distance (m)")
+    secyax.set_ylabel("Height (m)")
     ax.legend(loc='lower left')
 
 
@@ -212,11 +230,13 @@ def plot_time_distance(fig, series, title, subject):
     for i, result in enumerate(series):
         points = result["points"]
         time = [point[0] for point in points]
-        distance = [point[1][0]*M_TO_FEET for point in points]
+        distance = [point[1][0]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(time, distance)[0]
         configure_line(len(series)-i, trajectory, subject, result)
     ax.set_xlim(xmin=0, xmax=1.6)
     ax.set_ylim(ymin=0, ymax=275)
+    secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
+    secyax.set_ylabel("Distance Travelled (m)")
     ax.legend(loc='lower right')
 
 
@@ -229,11 +249,13 @@ def plot_time_velocity(fig, series, title, subject):
     for i, result in enumerate(series):
         points = result["points"]
         time = [point[0] for point in points]
-        velocity = [point[2][0]*M_TO_FEET for point in points]
+        velocity = [point[2][0]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(time, velocity)[0]
         configure_line(len(series)-i, trajectory, subject, result)
     ax.set_xlim(xmin=0, xmax=1.6)
     ax.set_ylim(ymin=0, ymax=500)
+    secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
+    secyax.set_ylabel("Velocity (m/s)")
     ax.legend(loc='upper right')
 
 

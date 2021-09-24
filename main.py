@@ -51,20 +51,12 @@ class BB_Class:
 
     @classmethod
     def magnus_spin_mod(cls, mass, energy) -> float:
-        # Arbitrary values to get a rise of about 1ft due to magnus effect.
-        
-        # Old 1
+        # Arbitrary values to get a decent magnus effect benefit
         base = 1
         energy_mod =    remap(energy,   min(ENERGIES),  max(ENERGIES),  1.0, 1.1)
         mass_mod =      remap(mass,     min(MASSES),    max(MASSES),    1.8, 1.4)
-        # Old 2
-        # global_weight = 1.25
-        # mass_weight = global_weight * 4
-        # energy_weight = global_weight * (1/8)
-        # mass_mod = (mass_weight*(0.5-mass*1000)**2)
-        # energy_mod = energy_weight*((energy-0.9)**2)
-        # print(mass*1000, mass_mod, energy, energy_mod)
-        return base * energy_mod * mass_mod
+        mod = base * energy_mod * mass_mod
+        return mod
 
 
     @classmethod
@@ -173,14 +165,14 @@ def get_plot_label(subject, result) -> str:
 def plot_graphs(series, datapoint, subject):
     fig = plt.figure(dpi=200, figsize=(20, 15), tight_layout=True)
     if subject == "J":
-        directory = f'energy/{datapoint}J.png'
+        directory = f'results/energy/{datapoint}J.png'
         trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
         time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb weights'
         time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb weights'
         # print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
-        directory = f'mass/{mass_g}g.png'
+        directory = f'results/mass/{mass_g}g.png'
         trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
         time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
         time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
@@ -261,8 +253,8 @@ def plot_time_velocity(fig, series, title, subject):
 
 def main():
     for directory in (
-        "energy",
-        "mass",
+        "results/energy",
+        "results/mass",
     ):
         if not os.path.isdir(directory):
             os.makedirs(directory)

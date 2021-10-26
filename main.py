@@ -2,12 +2,12 @@ from math import pi, sqrt, atan2, cos, sin, radians
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 import os
-from concurrent.futures import ProcessPoolExecutor
+import concurrent.futures
 
 RAD = 1.571
 AIR_DENSITY = 1.225
 AIR_DYNAMIC_VISCOSITY = 1.81e-5
-BB_DIAMETER = 5.95e-3
+BB_DIAMETER = 6e-3
 BB_RADIUS = BB_DIAMETER/2
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
@@ -32,8 +32,7 @@ class BB_Class:
         self.mass = mass
         self.initial_energy = energy
         self.velocity = BB_Class.get_intial_velocity(mass, energy)
-        self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(
-            self.velocity[0], mass, energy)
+        self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(self.velocity[0], mass)
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
@@ -50,16 +49,6 @@ class BB_Class:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
 
     @classmethod
-    def magnus_spin_mod(cls, mass, energy) -> float:
-        # Arbitrary values to get a decent magnus effect benefit
-        base = 1
-        energy_mod =    remap(energy,   min(ENERGIES),  max(ENERGIES),  1.0, 1.1)
-        mass_mod =      remap(mass,     min(MASSES),    max(MASSES),    1.8, 1.4)
-        mod = base * energy_mod * mass_mod
-        return mod
-
-
-    @classmethod
     def get_intial_velocity(cls, mass: float, energy: float) -> list:
         angle = radians(0)
         velocity = sqrt(energy/(0.5*mass))
@@ -69,15 +58,13 @@ class BB_Class:
         return [velocity_x, velocity_y]
 
     @classmethod
-    def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float, energy: float) -> float:
+    def get_initial_hop_angular_velocity(cls, component_velocity: float, mass: float) -> float:
         # Gets initial hop spin for straight flight
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
-        # Seems to decently capitalise on magnus effect
-        magnus_mod = BB_Class.magnus_spin_mod(mass, energy)
         F = mass * GRAVITY
         G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
         angular_velocity = G/(2*pi*BB_RADIUS**2)
-        return angular_velocity * magnus_mod
+        return angular_velocity
 
     def update_angular_velocity(self):
         # https://physics.stackexchange.com/questions/304742/angular-drag-on-body
@@ -250,6 +237,26 @@ def plot_time_velocity(fig, series, title, subject):
     secyax.set_ylabel("Velocity (m/s)")
     ax.legend(loc='upper right')
 
+# finds correct hop for 1ft of rise over flight time.
+def run_bb_optimally(pair):
+    mass, energy = pair
+    best_result = BB_Class(mass, energy).run_sim()
+    step = 0.01
+    i = 1 + step
+    while True:
+        bb = BB_Class(mass, energy)
+        bb.angular_velocity *= i
+        result = bb.run_sim()
+        points = result['points']
+        max_y = max([point[1][1]*FEET_PER_METRE for point in points])
+        if max_y < 6:
+            best_result = result
+            i += step
+        else:
+            break
+    print(f'Done {mass}, {energy}')
+    return best_result
+
 
 def main():
     for directory in (
@@ -259,20 +266,19 @@ def main():
         if not os.path.isdir(directory):
             os.makedirs(directory)
     results = []
-
+    pairs = []
     for energy in ENERGIES:
         for mass in MASSES:
-            result = BB_Class(mass, energy).run_sim()
-            results.append(result)
-            # print(result["summary"])
-    with ProcessPoolExecutor() as pe:
+            pairs.append((mass, energy))
+    with concurrent.futures.ProcessPoolExecutor() as pe:
+        # result_futures = pe.map(run_bb_optimally, pairs)
+        # list(concurrent.futures.as_completed(result_futures))
+        results = list(map(run_bb_optimally, pairs))
         for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]
-            #plot_graphs(series, energy, results, "J")
             pe.submit(plot_graphs, series, energy, "J")
         for mass in MASSES:
             series = [result for result in results if result["mass"] == mass]
-            #plot_graphs(series, mass, results, "M")
             pe.submit(plot_graphs, series, mass, "M")
 
 

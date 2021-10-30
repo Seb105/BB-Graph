@@ -240,16 +240,18 @@ def plot_time_velocity(fig, series, title, subject):
     ax.legend(loc='upper right')
 
 def plot_spin_mods(results):
-    fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10,7.5))
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(15,10))
     fig.tight_layout()
     fig.set_dpi(200)
     # ax.view_init(30, 30)
 
     masses = np.asarray([result["mass"]*1000 for result in results])
     ax.set_xlabel('Mass (g)')
-
+    ax.set_xticks (masses)
+    
     energies = np.asarray([result["energy"] for result in results])
     ax.set_ylabel('Energy (j)')
+    ax.set_yticks(energies)
 
     spin_mods = np.asarray([result["spin mod"] for result in results])
     ax.set_zlabel('Spin modifier for 6ft hop (9.81*n)')

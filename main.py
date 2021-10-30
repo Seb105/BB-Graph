@@ -1,6 +1,7 @@
 from math import pi, sqrt, atan2, cos, sin, radians
 import matplotlib.pyplot as plt
-from matplotlib import ticker
+from matplotlib import ticker, cm
+import numpy as np
 import os
 import concurrent.futures
 
@@ -16,7 +17,8 @@ GRAVITY = 9.81
 FEET_PER_METRE = 3.28084
 INITIAL_POSITION = [0, 5/FEET_PER_METRE]
 ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
-MASSES = (0.0002, 0.00025, 0.00028, 0.0003, 0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
+MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
+            0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -237,6 +239,28 @@ def plot_time_velocity(fig, series, title, subject):
     secyax.set_ylabel("Velocity (m/s)")
     ax.legend(loc='upper right')
 
+def plot_spin_mods(results):
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10,7.5))
+    fig.tight_layout()
+    fig.set_dpi(200)
+    # ax.view_init(30, 30)
+
+    masses = np.asarray([result["mass"]*1000 for result in results])
+    ax.set_xlabel('Mass (g)')
+
+    energies = np.asarray([result["energy"] for result in results])
+    ax.set_ylabel('Energy (j)')
+
+    spin_mods = np.asarray([result["spin mod"] for result in results])
+    ax.set_zlabel('Spin modifier for 6ft hop (9.81*n)')
+
+    surf = ax.plot_trisurf(masses, energies, spin_mods, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    for x, y, z in zip(masses, energies, spin_mods):
+        ax.text(x, y, z, f'{round(z,2)}')
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    fig.savefig("spin_mods.png")
+
+
 # finds correct hop for 1ft of rise over flight time.
 def run_bb_optimally(pair):
     mass, energy = pair
@@ -253,8 +277,10 @@ def run_bb_optimally(pair):
             best_result = result
             i += step
         else:
+            i -= step
             break
-    print(f'Done {mass}, {energy}')
+    best_result["spin mod"] = i
+    print(f'Done {mass*1000}g, {energy}j')
     return best_result
 
 
@@ -271,15 +297,15 @@ def main():
         for mass in MASSES:
             pairs.append((mass, energy))
     with concurrent.futures.ProcessPoolExecutor() as pe:
-        # result_futures = pe.map(run_bb_optimally, pairs)
-        # list(concurrent.futures.as_completed(result_futures))
-        results = list(map(run_bb_optimally, pairs))
+        results = list(pe.map(run_bb_optimally, pairs))
+        # results = list(map(run_bb_optimally, pairs))
         for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]
             pe.submit(plot_graphs, series, energy, "J")
         for mass in MASSES:
             series = [result for result in results if result["mass"] == mass]
             pe.submit(plot_graphs, series, mass, "M")
+        plot_spin_mods(results)
 
 
 if __name__ == "__main__":

@@ -243,45 +243,50 @@ def plot_spin_mods(results):
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(15,10))
     fig.tight_layout()
     fig.set_dpi(200)
-    # ax.view_init(30, 30)
+    ax.view_init(30, -30)
 
     masses = np.asarray([result["mass"]*1000 for result in results])
     ax.set_xlabel('Mass (g)')
     ax.set_xticks (masses)
-    
+    ax.invert_xaxis()
+
     energies = np.asarray([result["energy"] for result in results])
     ax.set_ylabel('Energy (j)')
     ax.set_yticks(energies)
 
-    spin_mods = np.asarray([result["spin mod"] for result in results])
-    ax.set_zlabel('Spin modifier for 6ft hop (9.81*n)')
+    angular_velocities = np.asarray([result["angular velocity"] for result in results])
+    ax.set_zlabel('RPM for 1ft hop rise')
 
-    surf = ax.plot_trisurf(masses, energies, spin_mods, cmap=cm.coolwarm, linewidth=0, antialiased=False)
-    for x, y, z in zip(masses, energies, spin_mods):
-        ax.text(x, y, z, f'{round(z,2)}')
+    surf = ax.plot_trisurf(masses, energies, angular_velocities, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    for x, y, z in zip(masses, energies, angular_velocities):
+        ax.text(x, y, z, f'{int(z)}', fontsize="small")
     fig.colorbar(surf, shrink=0.5, aspect=5)
-    fig.savefig("spin_mods.png")
+    fig.savefig("hop_rpm.png")
 
 
 # finds correct hop for 1ft of rise over flight time.
 def run_bb_optimally(pair):
     mass, energy = pair
-    best_result = BB_Class(mass, energy).run_sim()
+    bb = BB_Class(mass, energy)
+    best_angular_velocity = bb.angular_velocity
+    best_result = bb.run_sim()
     step = 0.01
     i = 1 + step
     while True:
         bb = BB_Class(mass, energy)
         bb.angular_velocity *= i
+        angular_velocity = bb.angular_velocity
         result = bb.run_sim()
         points = result['points']
         max_y = max([point[1][1]*FEET_PER_METRE for point in points])
         if max_y < 6:
+            best_angular_velocity = angular_velocity
             best_result = result
             i += step
         else:
             i -= step
             break
-    best_result["spin mod"] = i
+    best_result["angular velocity"] = best_angular_velocity * 9.5493
     print(f'Done {mass*1000}g, {energy}j')
     return best_result
 

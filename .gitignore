@@ -1,1 +1,6 @@
 cache
+main.build
+main.dist
+main.onefile-build
+main.exe
+*.png

@@ -7,9 +7,11 @@
         {
             "name": "Python: Current File",
             "type": "python",
+            "subProcess": true,
+            "externalConsole": true,
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal",
+            // "console": "integratedTerminal",
             "cwd": "${fileDirname}"
         }
     ]

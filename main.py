@@ -4,7 +4,8 @@ from matplotlib import ticker, cm
 import numpy as np
 import os
 import concurrent.futures
-import pickle
+import time
+import ujson as json
 
 RAD = 1.571
 AIR_DENSITY = 1.225
@@ -20,7 +21,7 @@ INITIAL_POSITION = [0, 5/FEET_PER_METRE]
 ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
-CLAMP_AXES = True
+CLAMP_AXES = False
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -44,7 +45,6 @@ class BB_Class:
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
-        self.key = str((self.mass, self.initial_energy, self.initial_angle, self.initial_rpm))
 
     def reynolds_number(self):
         flow_speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
@@ -127,31 +127,29 @@ class BB_Class:
         self.velocity = velocity
 
     def run_sim(self) -> dict:
-        if os.path.isfile(f'cache/{self.key}.bin'):
-            print(f'{self.key} was cached')
-            with open(f'cache/{self.key}.bin', 'rb') as f:
-                return pickle.load(f)
         points = []
         points.append((self.flight_time, self.position, self.velocity))
+        max_x = 0
+        max_y = 0
         while self.position[1] > 0:
             self.update_angular_velocity()
             self.update_velocity()
             self.update_position()
+            max_x = max(max_x, self.position[0])
+            max_y = max(max_y, self.position[1])
             self.flight_time += TIMESTEP
             points.append((self.flight_time, self.position, self.velocity))
         result = {
             "mass": self.mass,
             "energy": self.initial_energy,
-            "angle": self.initial_angle,
-            "rpm": self.initial_rpm,
-            "hop mod": self.hop_multiplier,
+            "angle": round(self.initial_angle, 1),
+            "rpm": round(self.initial_rpm),
+            "hop_mod": round(self.hop_multiplier, 2),
             "time": self.flight_time,
-            "summary": (self.mass, self.initial_energy, round(self.flight_time, 2), round(self.position[0], 2)),
             "points": points,
-            "key": self.key
+            "max_x": max_x,
+            "max_y": max_y,
         }
-        with open(f'cache/{self.key}.bin', 'wb') as f:
-            pickle.dump(result, f)
         return result
 
 def get_bb_fps(result: dict) -> str:
@@ -160,24 +158,25 @@ def get_bb_fps(result: dict) -> str:
 
 def get_plot_label(subject, result) -> str:
     fps = get_bb_fps(result)
+    stuff = f' {result["angle"]}° {result["rpm"]}rpm {result["hop_mod"]}x'
     if subject == "J":
         label = f'{round(result["mass"]*1000, 2)}g'
     else:
         label = f'{round(result["energy"], 2)}J'
-    return label + fps
+    return label + fps + stuff
 
 
 def plot_graphs(series, datapoint, subject):
     fig = plt.figure(dpi=200, figsize=(20, 15), tight_layout=True)
     if subject == "J":
-        directory = f'results/energy/{datapoint}J.png'
+        directory = f'graphs/energy/{datapoint}J.png'
         trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
         time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb weights'
         time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb weights'
         # print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
-        directory = f'results/mass/{mass_g}g.png'
+        directory = f'graphs/mass/{mass_g}g.png'
         trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
         time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
         time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
@@ -216,7 +215,7 @@ def plot_trajectory(fig, series, title, subject):
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secxax.set_xlabel("Distance (m)")
     secyax.set_ylabel("Height (m)")
-    ax.legend(loc='lower left')
+    ax.legend(loc='lower left' if CLAMP_AXES else 'upper left')
 
 
 def plot_time_distance(fig, series, title, subject):
@@ -293,55 +292,77 @@ def run_bb_1ft_hop(pair):
     while True:
         bb = BB_Class(mass, energy, hop_multiplier=i)
         result = bb.run_sim()
-        points = result['points']
-        max_y = max([point[1][1]*FEET_PER_METRE for point in points])
+        max_y = result['max_y']
         if max_y < 6:
             best_result = result
             i += step
         else:
-            i -= step
             break
-    print(f'Done {mass*1000}g, {energy}j')
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j')
     return best_result
 
+# finds correct hop and shooting angle for maximum distance.
 def run_bb_max_dist(pair):
     mass, energy = pair
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
-    best_x = max([point[1][0]*FEET_PER_METRE for point in best_result['points']])
-    angle_step = 0.5
-    angle = angle_step
+    best_x = best_result["max_x"]
+    angle_step = 1
+    hop_step = 0.1
+    angle = 0
     while angle < 90:
-        print(pair, angle)
+        angle_is_improvement = False
+        Progress_Bar.print(f'{mass*1000}g, {energy}j, {angle}deg')
         hop_multiplier = 1
-        while hop_multiplier < 4:
-            hop_multiplier += 0.1
-            bb = BB_Class(mass, energy, angle, hop_multiplier)
-            result = bb.run_sim()
-            max_x = max([point[1][0]*FEET_PER_METRE for point in result['points']])
-            if max_x>best_x:
+        while hop_multiplier < 16:
+            result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
+            max_x = result["max_x"]
+            if max_x > best_x:
                 best_x = max_x
                 best_result = result
-        angle += angle_step
-    print(f'Done {mass*1000}g, {energy}j')
+                angle_is_improvement = True
+            if hop_multiplier != 1 and max_x < best_x:
+                break
+            hop_multiplier += hop_step
+        if angle_is_improvement:
+            angle += angle_step
+        else:
+            break
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {angle}deg and {hop_multiplier}', 2)
     return best_result
 
 def main():
     for directory in (
-        "results/energy",
-        "results/mass",
+        "graphs/energy",
+        "graphs/mass",
         "cache",
     ):
         if not os.path.isdir(directory):
             os.makedirs(directory)
-    results = []
     pairs = []
     for energy in ENERGIES:
         for mass in MASSES:
             pairs.append((mass, energy))
     with concurrent.futures.ProcessPoolExecutor() as pe:
-        results = list(pe.map(run_bb_1ft_hop, pairs))
+        futures = []
+        results = []
+        if not os.path.isfile("cache/results.json"):
+            for pair in pairs:
+                futures.append(pe.submit(run_bb_max_dist, pair))
+            progress_bar = Progress_Bar("Running sims", len(pairs))
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+                progress_bar.update_progress()
+            del(progress_bar)
+            with open("cache/results.json", "w") as f:
+                json.dump(results, f)
+        else:
+            with open("cache/results.json", "r") as f:
+                results = json.load(f)
+        # list(pe.map(run_bb_1ft_hop, pairs))
         #results = map(run_bb_1ft_hop, pairs)
+        results = sorted(results, key=lambda result: result["energy"])
+        results = sorted(results, key=lambda result: result["mass"])
         for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]
             pe.submit(plot_graphs, series, energy, "J")
@@ -349,6 +370,49 @@ def main():
             series = [result for result in results if result["mass"] == mass]
             pe.submit(plot_graphs, series, mass, "M")
         plot_spin_mods(results)
+    print("Done")
+
+class Progress_Bar():
+    def __init__(self, activity, count):
+        self.activity = activity
+        self.count = count
+        self.i = -1
+        self.barlength = 20
+        self.start_time = time.time()
+        self.last_update = self.start_time-2
+        print("")
+        self.update_progress()
+
+    def update_exact(self, i):
+        self.i = i-1
+        self.update_progress()
+        
+    @classmethod
+    def print(cls, text, row=1):
+        #print(f"\033[{100}G {text}                                     ", end="")
+        newlines = "\n"*row
+        endlines = "\033[F"*row
+        print(f"{newlines}{text}                                     {endlines}", end="")
+        
+    def update_progress(self):
+        self.i += 1
+        progress = self.i/self.count
+        if self.last_update+1<time.time() or progress >= 1:
+            self.last_update=time.time()
+            block = int(round(self.barlength*progress))
+            if progress == 0:
+                seconds_remaining = -1
+            else:
+                seconds_remaining = int(((time.time() - self.start_time)/progress) * (1-progress))
+            blocks = "█" * block + "░" * (self.barlength - block)
+            text = f"\r{self.activity}: [{blocks}] {round(progress*100, 2)}%. {seconds_remaining} seconds remaining"
+            lineEnd = '\r' if progress<1.0 else '\n\n'
+            # print("                                                                                               ", end="\r")
+            print(text, end=lineEnd)
+
+    def __del__(self):
+        print("")
+        print(f"Done in {int(time.time()-self.start_time)}s")
 
 
 if __name__ == "__main__":

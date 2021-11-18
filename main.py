@@ -30,10 +30,10 @@ def ft2m(x):
     return x/FEET_PER_METRE
 
 class BB_Class:
-    def __init__(self, mass, energy):
+    def __init__(self, mass, energy, angle = 0):
         self.mass = mass
         self.initial_energy = energy
-        self.velocity = BB_Class.get_intial_velocity(mass, energy)
+        self.velocity = BB_Class.get_intial_velocity(mass, energy, angle)
         self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(self.velocity[0], mass)
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
@@ -51,8 +51,8 @@ class BB_Class:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
 
     @classmethod
-    def get_intial_velocity(cls, mass: float, energy: float) -> list:
-        angle = radians(0)
+    def get_intial_velocity(cls, mass: float, energy: float, angle = 0) -> list:
+        angle = radians(angle)
         velocity = sqrt(energy/(0.5*mass))
         velocity_x = cos(angle) * velocity
         velocity_y = sin(angle) * velocity
@@ -265,7 +265,7 @@ def plot_spin_mods(results):
 
 
 # finds correct hop for 1ft of rise over flight time.
-def run_bb_optimally(pair):
+def run_bb_1ft_hop(pair):
     mass, energy = pair
     bb = BB_Class(mass, energy)
     best_angular_velocity = bb.angular_velocity
@@ -304,7 +304,7 @@ def main():
         for mass in MASSES:
             pairs.append((mass, energy))
     with concurrent.futures.ProcessPoolExecutor() as pe:
-        results = list(pe.map(run_bb_optimally, pairs))
+        results = list(pe.map(run_bb_1ft_hop, pairs))
         # results = list(map(run_bb_optimally, pairs))
         for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]

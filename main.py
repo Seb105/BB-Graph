@@ -20,6 +20,7 @@ INITIAL_POSITION = [0, 5/FEET_PER_METRE]
 ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
+CLAMP_AXES = True
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min

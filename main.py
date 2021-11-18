@@ -39,11 +39,12 @@ class BB_Class:
         self.hop_multiplier = hop_multiplier
         self.velocity = BB_Class.get_intial_velocity(mass, energy, angle)
         self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(self.velocity[0], mass)*hop_multiplier
-        self.initial_rpm = self.angular_velocity* 9.5493
+        self.initial_rpm = self.angular_velocity * 9.5493
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
+        self.key = str((self.mass, self.initial_energy, self.initial_angle, self.initial_rpm))
 
     def reynolds_number(self):
         flow_speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
@@ -126,6 +127,10 @@ class BB_Class:
         self.velocity = velocity
 
     def run_sim(self) -> dict:
+        if os.path.isfile(f'cache/{self.key}.bin'):
+            print(f'{self.key} was cached')
+            with open(f'cache/{self.key}.bin', 'rb') as f:
+                return pickle.load(f)
         points = []
         points.append((self.flight_time, self.position, self.velocity))
         while self.position[1] > 0:
@@ -134,7 +139,7 @@ class BB_Class:
             self.update_position()
             self.flight_time += TIMESTEP
             points.append((self.flight_time, self.position, self.velocity))
-        return {
+        result = {
             "mass": self.mass,
             "energy": self.initial_energy,
             "angle": self.initial_angle,
@@ -142,9 +147,12 @@ class BB_Class:
             "hop mod": self.hop_multiplier,
             "time": self.flight_time,
             "summary": (self.mass, self.initial_energy, round(self.flight_time, 2), round(self.position[0], 2)),
-            "points": points
+            "points": points,
+            "key": self.key
         }
-
+        with open(f'cache/{self.key}.bin', 'wb') as f:
+            pickle.dump(result, f)
+        return result
 
 def get_bb_fps(result: dict) -> str:
     return f' ({round(sqrt(result["energy"]/(0.5*result["mass"])) * FEET_PER_METRE)}fps)'
@@ -305,12 +313,10 @@ def run_bb_max_dist(pair):
     angle = angle_step
     while angle < 90:
         print(pair, angle)
-        hop_ratio = 1
-        while hop_ratio < 4:
-            hop_ratio += 0.1
-            bb = BB_Class(mass, energy, angle)
-            bb.angular_velocity *= hop_ratio
-            angular_velocity = bb.angular_velocity
+        hop_multiplier = 1
+        while hop_multiplier < 4:
+            hop_multiplier += 0.1
+            bb = BB_Class(mass, energy, angle, hop_multiplier)
             result = bb.run_sim()
             max_x = max([point[1][0]*FEET_PER_METRE for point in result['points']])
             if max_x>best_x:
@@ -324,6 +330,7 @@ def main():
     for directory in (
         "results/energy",
         "results/mass",
+        "cache",
     ):
         if not os.path.isdir(directory):
             os.makedirs(directory)
@@ -334,7 +341,7 @@ def main():
             pairs.append((mass, energy))
     with concurrent.futures.ProcessPoolExecutor() as pe:
         results = list(pe.map(run_bb_1ft_hop, pairs))
-        # results = list(map(run_bb_optimally, pairs))
+        #results = map(run_bb_1ft_hop, pairs)
         for energy in ENERGIES:
             series = [result for result in results if result["energy"] == energy]
             pe.submit(plot_graphs, series, energy, "J")

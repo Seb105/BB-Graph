@@ -4,6 +4,7 @@ from matplotlib import ticker, cm
 import numpy as np
 import os
 import concurrent.futures
+import pickle
 
 RAD = 1.571
 AIR_DENSITY = 1.225
@@ -30,11 +31,14 @@ def ft2m(x):
     return x/FEET_PER_METRE
 
 class BB_Class:
-    def __init__(self, mass, energy, angle = 0):
+    def __init__(self, mass, energy, angle = 0, hop_multiplier = 1):
         self.mass = mass
         self.initial_energy = energy
+        self.initial_angle = angle
+        self.hop_multiplier = hop_multiplier
         self.velocity = BB_Class.get_intial_velocity(mass, energy, angle)
-        self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(self.velocity[0], mass)
+        self.angular_velocity = BB_Class.get_initial_hop_angular_velocity(self.velocity[0], mass)*hop_multiplier
+        self.initial_rpm = self.angular_velocity* 9.5493
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
@@ -132,6 +136,9 @@ class BB_Class:
         return {
             "mass": self.mass,
             "energy": self.initial_energy,
+            "angle": self.initial_angle,
+            "rpm": self.initial_rpm,
+            "hop mod": self.hop_multiplier,
             "time": self.flight_time,
             "summary": (self.mass, self.initial_energy, round(self.flight_time, 2), round(self.position[0], 2)),
             "points": points
@@ -193,8 +200,9 @@ def plot_trajectory(fig, series, title, subject):
         positions_y = [point[1][1]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(positions_x, positions_y)[0]
         configure_line(i, trajectory, subject, result)
-    ax.set_xlim(xmin=0, xmax=275)
-    ax.set_ylim(ymin=0, ymax=6.5)
+    if CLAMP_AXES:
+        ax.set_xlim(xmin=0, xmax=275)
+        ax.set_ylim(ymin=0, ymax=6.5)
     secxax = ax.secondary_xaxis('top', functions=(ft2m, m2ft))
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secxax.set_xlabel("Distance (m)")
@@ -214,8 +222,9 @@ def plot_time_distance(fig, series, title, subject):
         distance = [point[1][0]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(time, distance)[0]
         configure_line(len(series)-i, trajectory, subject, result)
-    ax.set_xlim(xmin=0, xmax=1.6)
-    ax.set_ylim(ymin=0, ymax=275)
+    if CLAMP_AXES:
+        ax.set_xlim(xmin=0, xmax=1.6)
+        ax.set_ylim(ymin=0, ymax=275)
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Distance Travelled (m)")
     ax.legend(loc='lower right')
@@ -233,8 +242,9 @@ def plot_time_velocity(fig, series, title, subject):
         velocity = [point[2][0]*FEET_PER_METRE for point in points]
         trajectory = ax.plot(time, velocity)[0]
         configure_line(len(series)-i, trajectory, subject, result)
-    ax.set_xlim(xmin=0, xmax=1.6)
-    ax.set_ylim(ymin=0, ymax=500)
+    if CLAMP_AXES:
+        ax.set_xlim(xmin=0, xmax=1.6)
+        ax.set_ylim(ymin=0, ymax=500)
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Velocity (m/s)")
     ax.legend(loc='upper right')
@@ -254,7 +264,7 @@ def plot_spin_mods(results):
     ax.set_ylabel('Energy (j)')
     ax.set_yticks(energies)
 
-    angular_velocities = np.asarray([result["angular velocity"] for result in results])
+    angular_velocities = np.asarray([result["rpm"] for result in results])
     ax.set_zlabel('RPM for 1ft hop rise')
 
     surf = ax.plot_trisurf(masses, energies, angular_velocities, cmap=cm.coolwarm, linewidth=0, antialiased=False)
@@ -268,28 +278,46 @@ def plot_spin_mods(results):
 def run_bb_1ft_hop(pair):
     mass, energy = pair
     bb = BB_Class(mass, energy)
-    best_angular_velocity = bb.angular_velocity
     best_result = bb.run_sim()
     step = 0.01
     i = 1 + step
     while True:
-        bb = BB_Class(mass, energy)
-        bb.angular_velocity *= i
-        angular_velocity = bb.angular_velocity
+        bb = BB_Class(mass, energy, hop_multiplier=i)
         result = bb.run_sim()
         points = result['points']
         max_y = max([point[1][1]*FEET_PER_METRE for point in points])
         if max_y < 6:
-            best_angular_velocity = angular_velocity
             best_result = result
             i += step
         else:
             i -= step
             break
-    best_result["angular velocity"] = best_angular_velocity * 9.5493
     print(f'Done {mass*1000}g, {energy}j')
     return best_result
 
+def run_bb_max_dist(pair):
+    mass, energy = pair
+    bb = BB_Class(mass, energy)
+    best_result = bb.run_sim()
+    best_x = max([point[1][0]*FEET_PER_METRE for point in best_result['points']])
+    angle_step = 0.5
+    angle = angle_step
+    while angle < 90:
+        print(pair, angle)
+        hop_ratio = 1
+        while hop_ratio < 4:
+            hop_ratio += 0.1
+            bb = BB_Class(mass, energy, angle)
+            bb.angular_velocity *= hop_ratio
+            angular_velocity = bb.angular_velocity
+            result = bb.run_sim()
+            max_x = max([point[1][0]*FEET_PER_METRE for point in result['points']])
+            if max_x>best_x:
+                best_x = max_x
+                best_result = result
+        angle += angle_step
+    print(f'Done {mass*1000}g, {energy}j')
+    return best_result
 
 def main():
     for directory in (

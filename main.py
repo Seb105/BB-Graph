@@ -6,10 +6,12 @@ import os
 import concurrent.futures
 import time
 import ujson as json
-
-import ctypes
-kernel32 = ctypes.windll.kernel32
-kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+import sys
+if os.name == 'nt': # Only if we are running on Windows
+    from ctypes import windll
+    k = windll.kernel32
+    k.SetConsoleMode(k.GetStdHandle(-11), 7)
+sys.stdout.write("\x1b[8;{rows};{cols}t".format(rows=64, cols=100))
 
 RAD = 1.571
 AIR_DENSITY = 1.225
@@ -286,60 +288,69 @@ def plot_spin_mods(results):
     fig.savefig("hop_rpm.png")
 
 
-# finds correct hop for 1ft of rise over flight time.
-def run_bb_1ft_hop(pair):
+# finds correct hop for 1ft of deviacne of rise over flight time.
+def run_bb_1ft_hop(pair, row):
     mass, energy = pair
-    row = MASSES.index(mass)+2
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
     best_x = best_result["max_x"]
-    angle_step = 0.01
     hop_step = 0.001
     angle = 0
+    hop_multiplier = 1
+    useless_steps = 0
     while True:
-        hop_multiplier = 1
-        while hop_multiplier < 10:
-            Progress_Bar.print(f'{angle}deg, {hop_multiplier}x, {round(mass*1000, 2)}g, {energy}j', row)
-            result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
-            max_x = result["max_x"]
-            max_y = result["max_y"]
-            if max_y > ft2m(6):
-                break
-            if max_x > best_x:
-                best_x = max_x
-                best_result = result
-            hop_multiplier = round(hop_multiplier + hop_step, 3)
-        angle = round(angle + angle_step, 3)
-        if angle>15 or (max_y>ft2m(6) and hop_multiplier == 1):
+        Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
+        result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
+        max_x = result["max_x"]
+        max_y = result["max_y"]
+        if max_y > ft2m(6):
             break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 1)
+        if max_x > best_x:
+            best_x = max_x
+            best_result = result
+            useless_steps = -1
+        else:
+            useless_steps += 1
+        hop_multiplier = round(hop_multiplier + hop_step, 3)
+        if useless_steps > 10:
+            pass
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x', row)
     return best_result
 
-# finds correct hop and shooting angle for maximum distance.
-def run_bb_max_dist(pair):
+# finds correct hop and shooting angle for maximum distance. Currently non functional
+def run_bb_max_dist(pair, row):
     mass, energy = pair
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
-    best_x = best_result["max_x"]
-    angle_step = 1
-    hop_step = 0.1
+    best_x = 0
+    angle_step = 0.001
+    hop_step = 0.001
     angle = 0
+    hop_multiplier = 1
+    useless_angle_steps = 0
     while True:
-        angle_is_improvement = False
         hop_multiplier = 1
-        while hop_multiplier < 10:
-            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j')
+        useless_hop_steps = 0
+        best_x = 0
+        while True:
+            Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
             result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
             max_x = result["max_x"]
             if max_x > best_x:
                 best_x = max_x
                 best_result = result
-                angle_is_improvement = True
-            hop_multiplier += hop_step
-        angle += angle_step
-        if not angle_is_improvement:
+                useless_angle_steps = -1
+                useless_hop_steps = 0
+            else:
+                useless_hop_steps += 1
+            if useless_hop_steps > 10:
+                break
+            hop_multiplier = round(hop_multiplier + hop_step, 3)
+        useless_angle_steps += 1
+        angle = round(angle + angle_step, 3)
+        if useless_angle_steps > 10:
             break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 2)
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x', row)
     return best_result
 
 def main():
@@ -351,16 +362,18 @@ def main():
         if not os.path.isdir(directory):
             os.makedirs(directory)
     pairs = []
-    for energy in ENERGIES:
-        for mass in MASSES:
+    for mass in MASSES:
+        for energy in ENERGIES:
             pairs.append((mass, energy))
+    
     with concurrent.futures.ProcessPoolExecutor() as pe:
         futures = []
         results = []
         if not os.path.isfile("cache/results.json"):
-            for pair in pairs:
-                futures.append(pe.submit(run_bb_1ft_hop, pair))
             progress_bar = Progress_Bar("Running sims", len(pairs))
+            for i, pair in enumerate(pairs):
+                Progress_Bar.print(f'{pair} not started', i)
+                futures.append(pe.submit(run_bb_1ft_hop, pair, i))
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
                 progress_bar.update_progress()
@@ -387,39 +400,44 @@ class Progress_Bar():
     def __init__(self, activity, count):
         self.activity = activity
         self.count = count
-        self.i = -1
+        self.i = 0
         self.barlength = 20
         self.start_time = time.time()
         self.last_update = self.start_time-2
         print("")
-        self.update_progress()
+        self.print_bar()
+
 
     def update_exact(self, i):
         self.i = i-1
         self.update_progress()
         
     @classmethod
-    def print(cls, text, row=1):
-        #print(f"\033[{100}G {text}                                     ", end="")
-        newlines = "\n"*row
-        endlines = "\033[F"*row
-        print(f"{newlines}{text}                                     {endlines}", end="")
-        
+    def print(cls, text, row=0):
+        row+=1
+        newlines = "\033[s" + f"\033[{row}E"
+        endlines = "\033[u"
+        sys.stdout.flush()
+        sys.stdout.write(f"{newlines}{text}      {endlines}")
+
+    def print_bar(self):
+        progress = self.i/self.count
+        self.last_update=time.time()
+        block = int(round(self.barlength*progress))
+        if progress == 0:
+            seconds_remaining = -1
+        else:
+            seconds_remaining = int(((time.time() - self.start_time)/progress) * (1-progress))
+        blocks = "█" * block + "░" * (self.barlength - block)
+        text = f"\r{self.activity}: [{blocks}] {round(progress*100, 2)}%. {seconds_remaining} seconds remaining"
+        lineEnd = '\r' if progress<1.0 else '\n\n'
+        # print("                                                                                               ", end="\r")
+        print(text, end=lineEnd)
+
     def update_progress(self):
         self.i += 1
-        progress = self.i/self.count
-        if self.last_update+1<time.time() or progress >= 1:
-            self.last_update=time.time()
-            block = int(round(self.barlength*progress))
-            if progress == 0:
-                seconds_remaining = -1
-            else:
-                seconds_remaining = int(((time.time() - self.start_time)/progress) * (1-progress))
-            blocks = "█" * block + "░" * (self.barlength - block)
-            text = f"\r{self.activity}: [{blocks}] {round(progress*100, 2)}%. {seconds_remaining} seconds remaining"
-            lineEnd = '\r' if progress<1.0 else '\n\n'
-            # print("                                                                                               ", end="\r")
-            print(text, end=lineEnd)
+        if time.time() - self.last_update > 1:
+            self.print_bar()
 
     def __del__(self):
         print("")

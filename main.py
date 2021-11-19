@@ -142,9 +142,9 @@ class BB_Class:
         result = {
             "mass": self.mass,
             "energy": self.initial_energy,
-            "angle": round(self.initial_angle, 2),
+            "angle": round(self.initial_angle, 3),
+            "hop_mod": round(self.hop_multiplier, 3),
             "rpm": round(self.initial_rpm),
-            "hop_mod": round(self.hop_multiplier, 2),
             "time": self.flight_time,
             "points": points,
             "max_x": max_x,

@@ -7,6 +7,10 @@ import concurrent.futures
 import time
 import ujson as json
 
+import ctypes
+kernel32 = ctypes.windll.kernel32
+kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+
 RAD = 1.571
 AIR_DENSITY = 1.225
 AIR_DYNAMIC_VISCOSITY = 1.81e-5
@@ -285,6 +289,7 @@ def plot_spin_mods(results):
 # finds correct hop for 1ft of rise over flight time.
 def run_bb_1ft_hop(pair):
     mass, energy = pair
+    row = MASSES.index(mass)+2
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
     best_x = best_result["max_x"]
@@ -294,7 +299,7 @@ def run_bb_1ft_hop(pair):
     while True:
         hop_multiplier = 1
         while hop_multiplier < 10:
-            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j')
+            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j', row)
             result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
             max_x = result["max_x"]
             max_y = result["max_y"]
@@ -307,7 +312,7 @@ def run_bb_1ft_hop(pair):
         angle += angle_step
         if angle>15 or (max_y>ft2m(6) and hop_multiplier == 1):
             break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 2)
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 1)
     return best_result
 
 # finds correct hop and shooting angle for maximum distance.

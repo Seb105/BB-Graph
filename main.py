@@ -142,7 +142,7 @@ class BB_Class:
         result = {
             "mass": self.mass,
             "energy": self.initial_energy,
-            "angle": round(self.initial_angle, 1),
+            "angle": round(self.initial_angle, 2),
             "rpm": round(self.initial_rpm),
             "hop_mod": round(self.hop_multiplier, 2),
             "time": self.flight_time,
@@ -310,25 +310,22 @@ def run_bb_max_dist(pair):
     angle_step = 1
     hop_step = 0.1
     angle = 0
-    while angle < 90:
+    while True:
         angle_is_improvement = False
-        Progress_Bar.print(f'{mass*1000}g, {energy}j, {angle}deg')
         hop_multiplier = 1
-        while hop_multiplier < 16:
+        while hop_multiplier < 10:
+            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j')
             result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
             max_x = result["max_x"]
             if max_x > best_x:
                 best_x = max_x
                 best_result = result
                 angle_is_improvement = True
-            if hop_multiplier != 1 and max_x < best_x:
-                break
             hop_multiplier += hop_step
-        if angle_is_improvement:
-            angle += angle_step
-        else:
+        angle += angle_step
+        if not angle_is_improvement:
             break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {angle}deg and {hop_multiplier}', 2)
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 2)
     return best_result
 
 def main():

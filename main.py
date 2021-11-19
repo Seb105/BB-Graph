@@ -293,7 +293,7 @@ def run_bb_1ft_hop(pair):
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
     best_x = best_result["max_x"]
-    angle_step = 0.001
+    angle_step = 0.01
     hop_step = 0.001
     angle = 0
     while True:

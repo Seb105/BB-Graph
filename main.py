@@ -21,7 +21,7 @@ INITIAL_POSITION = [0, 5/FEET_PER_METRE]
 ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
-CLAMP_AXES = False
+CLAMP_AXES = True
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -287,18 +287,27 @@ def run_bb_1ft_hop(pair):
     mass, energy = pair
     bb = BB_Class(mass, energy)
     best_result = bb.run_sim()
-    step = 0.01
-    i = 1 + step
+    best_x = best_result["max_x"]
+    angle_step = 0.001
+    hop_step = 0.001
+    angle = 0
     while True:
-        bb = BB_Class(mass, energy, hop_multiplier=i)
-        result = bb.run_sim()
-        max_y = result['max_y']
-        if max_y < 6:
-            best_result = result
-            i += step
-        else:
+        hop_multiplier = 1
+        while hop_multiplier < 10:
+            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j')
+            result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
+            max_x = result["max_x"]
+            max_y = result["max_y"]
+            if max_y > ft2m(6):
+                break
+            if max_x > best_x:
+                best_x = max_x
+                best_result = result
+            hop_multiplier += hop_step
+        angle += angle_step
+        if angle>15 or (max_y>ft2m(6) and hop_multiplier == 1):
             break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j')
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 2)
     return best_result
 
 # finds correct hop and shooting angle for maximum distance.
@@ -345,7 +354,7 @@ def main():
         results = []
         if not os.path.isfile("cache/results.json"):
             for pair in pairs:
-                futures.append(pe.submit(run_bb_max_dist, pair))
+                futures.append(pe.submit(run_bb_1ft_hop, pair))
             progress_bar = Progress_Bar("Running sims", len(pairs))
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
@@ -366,7 +375,7 @@ def main():
         for mass in MASSES:
             series = [result for result in results if result["mass"] == mass]
             pe.submit(plot_graphs, series, mass, "M")
-        plot_spin_mods(results)
+        #plot_spin_mods(results)
     print("Done")
 
 class Progress_Bar():

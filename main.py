@@ -299,7 +299,7 @@ def run_bb_1ft_hop(pair):
     while True:
         hop_multiplier = 1
         while hop_multiplier < 10:
-            Progress_Bar.print(f'{angle}deg, {round(hop_multiplier, 2)}x, {round(mass*1000, 2)}g, {energy}j', row)
+            Progress_Bar.print(f'{angle}deg, {hop_multiplier}x, {round(mass*1000, 2)}g, {energy}j', row)
             result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
             max_x = result["max_x"]
             max_y = result["max_y"]
@@ -308,8 +308,8 @@ def run_bb_1ft_hop(pair):
             if max_x > best_x:
                 best_x = max_x
                 best_result = result
-            hop_multiplier += hop_step
-        angle += angle_step
+            hop_multiplier = round(hop_multiplier + hop_step, 3)
+        angle = round(angle + angle_step, 3)
         if angle>15 or (max_y>ft2m(6) and hop_multiplier == 1):
             break
     Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}', 1)

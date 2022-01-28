@@ -24,7 +24,7 @@ TIMESTEP = 1/1000
 GRAVITY = 9.81
 FEET_PER_METRE = 3.28084
 INITIAL_POSITION = [0, 5/FEET_PER_METRE]
-ENERGIES = (0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
+ENERGIES = (0.7, 0.8, 0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 CLAMP_AXES = True
@@ -164,7 +164,7 @@ def get_bb_fps(result: dict) -> str:
 
 def get_plot_label(subject, result) -> str:
     fps = get_bb_fps(result)
-    stuff = f' {result["angle"]}° {result["rpm"]}rpm {result["hop_mod"]}x'
+    stuff = f' {result["rpm"]}rpm'
     if subject == "J":
         label = f'{round(result["mass"]*1000, 2)}g'
     else:
@@ -314,7 +314,7 @@ def run_bb_1ft_hop(pair, row):
         hop_multiplier = round(hop_multiplier + hop_step, 3)
         if useless_steps > 10:
             pass
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x', row)
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x hop mod', row)
     return best_result
 
 # finds correct hop and shooting angle for maximum distance. Currently non functional

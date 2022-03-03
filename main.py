@@ -53,8 +53,7 @@ class BB_Class:
         self.flight_time = 0
 
     def reynolds_number(self):
-        flow_speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
-        return (AIR_DENSITY*flow_speed*BB_DIAMETER)/AIR_DYNAMIC_VISCOSITY
+        return (p*w*b**2)/u
 
     def drag_coef(self):
         return 24/self.reynolds_number()
@@ -164,12 +163,11 @@ def get_bb_fps(result: dict) -> str:
 
 def get_plot_label(subject, result) -> str:
     fps = get_bb_fps(result)
-    stuff = f' {result["rpm"]}rpm'
     if subject == "J":
         label = f'{round(result["mass"]*1000, 2)}g'
     else:
         label = f'{round(result["energy"], 2)}J'
-    return label + fps + stuff
+    return label + fps
 
 
 def plot_graphs(series, datapoint, subject):

@@ -235,7 +235,7 @@ def plot_time_distance(fig, series, title, subject):
         trajectory = ax.plot(time, distance)[0]
         configure_line(len(series)-i, trajectory, subject, result)
     if CLAMP_AXES:
-        ax.set_xlim(xmin=0, xmax=1.6)
+        ax.set_xlim(xmin=0, xmax=1.8)
         ax.set_ylim(ymin=0, ymax=275)
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Distance Travelled (m)")
@@ -255,7 +255,7 @@ def plot_time_velocity(fig, series, title, subject):
         trajectory = ax.plot(time, velocity)[0]
         configure_line(len(series)-i, trajectory, subject, result)
     if CLAMP_AXES:
-        ax.set_xlim(xmin=0, xmax=1.6)
+        ax.set_xlim(xmin=0, xmax=1.8)
         ax.set_ylim(ymin=0, ymax=500)
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Velocity (m/s)")

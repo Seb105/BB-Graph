@@ -29,6 +29,19 @@ MASSES =    (0.0002, 0.00025, 0.00028, 0.0003,
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 CLAMP_AXES = True
 
+REYNOLDS_GRAPH = [
+    [1.0E+02,    1.500],
+    [1.0E+03,    0.750],
+    [1.0E+04,    0.500],
+    [1.0E+05,    0.505],
+    [2.0E+05,    0.510],
+    [3.0E+05,    0.100],
+    [1.0E+06,    0.150],
+    [2.0E+06,    0.250],
+    [6.0E+06,    0.300],
+    [1.0E+08,    0.400],
+]
+
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
@@ -49,14 +62,26 @@ class BB_Class:
         self.initial_rpm = self.angular_velocity * 9.5493
         self.position = INITIAL_POSITION.copy()
         self.moment_of_inerta = (2/5)*mass*BB_RADIUS**2
+        self.drag_coef = self.update_drag_coef()
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
 
-    def reynolds_number(self):
-        return (p*w*b**2)/u
+    def get_reynolds_number(self):
+        velocity = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+        reynolds_number = (AIR_DENSITY * velocity * BB_DIAMETER) / AIR_DYNAMIC_VISCOSITY
+        return reynolds_number
 
-    def drag_coef(self):
-        return 24/self.reynolds_number()
+    def update_drag_coef(self):
+        reynolds_current = self.get_reynolds_number()
+        for (i, (reynolds_lower, drag_coef_lower)) in enumerate(REYNOLDS_GRAPH):
+            if reynolds_current < reynolds_lower:
+                reynolds_upper, drag_coef_upper = REYNOLDS_GRAPH[i+1]
+                drag_coef = remap(reynolds_current, reynolds_lower, reynolds_upper, drag_coef_lower, drag_coef_upper)
+                self.drag_coef = drag_coef
+                return
+        self.drag_coef = 1.5
+        return
+            
 
     def vortex_strength(self) -> float:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
@@ -85,9 +110,9 @@ class BB_Class:
             self.angular_velocity*BB_DIAMETER*BB_RADIUS
         shear_torque = BB_RADIUS * shear_force
         shear_delta = (shear_torque / self.moment_of_inerta) * TIMESTEP
-
+        drag_coef = self.drag_coef
         friction_torque = pi*self.angular_velocity**2*BB_RADIUS**4 * \
-            BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
+            BB_DIAMETER*AIR_DENSITY*drag_coef
         friction_delta = (friction_torque / self.moment_of_inerta) * TIMESTEP
         self.angular_velocity = self.angular_velocity - shear_delta - friction_delta
 
@@ -105,8 +130,9 @@ class BB_Class:
     def calc_drag(self) -> list:
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
+        drag_coef = self.drag_coef
         # https://en.wikipedia.org/wiki/Drag_equation
-        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
+        F = drag_coef*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
         # F = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
         delta_speed = F/self.mass
         delta_X = sin(direction) * delta_speed
@@ -133,17 +159,18 @@ class BB_Class:
 
     def run_sim(self) -> dict:
         points = []
-        points.append((self.flight_time, self.position, self.velocity))
+        points.append((self.flight_time, self.position, self.velocity, self.drag_coef, self.get_reynolds_number()))
         max_x = 0
         max_y = 0
         while self.position[1] > 0:
+            self.update_drag_coef()
             self.update_angular_velocity()
             self.update_velocity()
             self.update_position()
             max_x = max(max_x, self.position[0])
             max_y = max(max_y, self.position[1])
             self.flight_time += TIMESTEP
-            points.append((self.flight_time, self.position, self.velocity))
+            points.append((self.flight_time, self.position, self.velocity, self.drag_coef, self.get_reynolds_number()))
         result = {
             "mass": self.mass,
             "energy": self.initial_energy,
@@ -177,6 +204,8 @@ def plot_graphs(series, datapoint, subject):
         trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
         time_distance_title = f'Time-distance graphs at {datapoint} joules for various bb weights'
         time_velocity_title = f'Time-velocity graphs at {datapoint} joules for various bb weights'
+        time_drag_coef_title = f'Time-drag coefficient graphs at {datapoint} joules for various bb weights'
+        time_reynolds_title = f'Time-Reynolds number graphs at {datapoint} joules for various bb weights'
         # print(f'Plotting graphs for {datapoint}J bbs')
     else:
         mass_g = round(datapoint*1000, 2)
@@ -184,10 +213,14 @@ def plot_graphs(series, datapoint, subject):
         trajectory_title = f'Trajectories for {mass_g}g bbs at various energy levels'
         time_distance_title = f'Time-distance graphs for {mass_g}g bbs at various energy levels'
         time_velocity_title = f'Time-velocity graphs for {mass_g}g bbs at various energy levels'
+        time_drag_coef_title = f'Time-drag coefficient graphs for {mass_g}g bbs at various energy levels'
+        time_reynolds_title = f'Time-Reynolds number graphs for {mass_g}g bbs at various energy levels'
         # print(f'Plotting graphs for {mass_g}g bbs')
     plot_trajectory(fig, series, trajectory_title, subject)
-    plot_time_distance(fig, series, time_distance_title, subject)
-    plot_time_velocity(fig, series, time_velocity_title, subject)
+    # plot_time_distance(fig, series, time_distance_title, subject)
+    # plot_time_velocity(fig, series, time_velocity_title, subject)
+    plot_time_drag_coef(fig, series, time_drag_coef_title, subject)
+    plot_time_reynolds(fig, series, time_reynolds_title, subject)
     fig.savefig(directory)
 
 
@@ -213,7 +246,7 @@ def plot_trajectory(fig, series, title, subject):
         trajectory = ax.plot(positions_x, positions_y)[0]
         configure_line(i, trajectory, subject, result)
     if CLAMP_AXES:
-        ax.set_xlim(xmin=0, xmax=275)
+        ax.set_xlim(xmin=0, xmax=300)
         ax.set_ylim(ymin=0, ymax=6.5)
     secxax = ax.secondary_xaxis('top', functions=(ft2m, m2ft))
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
@@ -260,6 +293,40 @@ def plot_time_velocity(fig, series, title, subject):
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Velocity (m/s)")
     ax.legend(loc='upper right')
+
+def plot_time_drag_coef(fig, series, title, subject):
+    ax = fig.add_subplot(2, 2, 4)
+    ax.grid(b=True)
+    ax.set_title(title)
+    ax.set_ylabel('Drag Coefficient')
+    ax.set_xlabel('Time (s)')
+    for i, result in enumerate(series):
+        points = result["points"]
+        time = [point[0] for point in points]
+        drag_coef = [point[3] for point in points]
+        trajectory = ax.plot(time, drag_coef)[0]
+        configure_line(len(series)-i, trajectory, subject, result)
+    if CLAMP_AXES:
+        ax.set_xlim(xmin=0, xmax=1.8)
+        # ax.set_ylim(ymin=0, ymax=0.5)
+    ax.legend(loc='lower right')
+
+def plot_time_reynolds(fig, series, title, subject):
+    ax = fig.add_subplot(2, 2, 3)
+    ax.grid(b=True)
+    ax.set_title(title)
+    ax.set_ylabel('Reynolds Number')
+    ax.set_xlabel('Time (s)')
+    for i, result in enumerate(series):
+        points = result["points"]
+        time = [point[0] for point in points]
+        drag_coef = [point[4] for point in points]
+        trajectory = ax.plot(time, drag_coef)[0]
+        configure_line(len(series)-i, trajectory, subject, result)
+    if CLAMP_AXES:
+        ax.set_xlim(xmin=0, xmax=1.8)
+        # ax.set_ylim(ymin=0, ymax=0.5)
+    ax.legend(loc='lower right')
 
 def plot_spin_mods(results):
     fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(15,10))

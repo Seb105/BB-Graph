@@ -11,12 +11,12 @@ if os.name == 'nt': # Only if we are running on Windows
     from ctypes import windll
     k = windll.kernel32
     k.SetConsoleMode(k.GetStdHandle(-11), 7)
-sys.stdout.write("\x1b[8;{rows};{cols}t".format(rows=64, cols=100))
+sys.stdout.write(f"\x1b[8;{64};{100}t")
 
 RAD = 1.571
 AIR_DENSITY = 1.225
 AIR_DYNAMIC_VISCOSITY = 1.81e-5
-BB_DIAMETER = 6e-3
+BB_DIAMETER = 5.95e-3
 BB_RADIUS = BB_DIAMETER/2
 SPHERE_DRAG_COEF = 0.47
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
@@ -28,6 +28,7 @@ ENERGIES = (0.7, 0.8, 0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 CLAMP_AXES = True
+USE_CACHE = False
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -52,8 +53,8 @@ class BB_Class:
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
 
-    def reynolds_number(self):
-        return (p*w*b**2)/u
+    # def reynolds_number(self):
+    #     return (p*w*b**2)/u
 
     def drag_coef(self):
         return 24/self.reynolds_number()
@@ -106,7 +107,7 @@ class BB_Class:
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
         # https://en.wikipedia.org/wiki/Drag_equation
-        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*speed**2*SPHERE_FRONTAL_AREA
+        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*(speed**2)*SPHERE_FRONTAL_AREA
         # F = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
         delta_speed = F/self.mass
         delta_X = sin(direction) * delta_speed
@@ -120,30 +121,34 @@ class BB_Class:
         ]
 
     def update_velocity(self):
-        deltas = [
+        acccelerations = [
             self.calc_magnus_effect(),
             self.calc_drag()
         ]
+        acceleration = [0, 0]
+        for delta in acccelerations:
+            acceleration[0] += delta[0]
+            acceleration[1] += delta[1]
+        acceleration[1] += -GRAVITY  # Gravity
         velocity = self.velocity.copy()
-        for delta in deltas:
-            velocity[0] += delta[0]*TIMESTEP
-            velocity[1] += delta[1]*TIMESTEP
-        velocity[1] += -GRAVITY * TIMESTEP  # Gravity
+        velocity[0] += acceleration[0] * TIMESTEP
+        velocity[1] += acceleration[1] * TIMESTEP
         self.velocity = velocity
+        return acceleration
 
     def run_sim(self) -> dict:
         points = []
-        points.append((self.flight_time, self.position, self.velocity))
+        points.append((self.flight_time, self.position, self.velocity, [0, 0]))
         max_x = 0
         max_y = 0
         while self.position[1] > 0:
             self.update_angular_velocity()
-            self.update_velocity()
+            acceleration = self.update_velocity()
             self.update_position()
             max_x = max(max_x, self.position[0])
             max_y = max(max_y, self.position[1])
             self.flight_time += TIMESTEP
-            points.append((self.flight_time, self.position, self.velocity))
+            points.append((self.flight_time, self.position, self.velocity, acceleration))
         result = {
             "mass": self.mass,
             "energy": self.initial_energy,
@@ -286,7 +291,7 @@ def plot_spin_mods(results):
     fig.savefig("hop_rpm.png")
 
 
-# finds correct hop for 1ft of deviacne of rise over flight time.
+# finds correct hop for max of 6ft rise
 def run_bb_1ft_hop(pair, row):
     mass, energy = pair
     bb = BB_Class(mass, energy)
@@ -295,7 +300,6 @@ def run_bb_1ft_hop(pair, row):
     hop_step = 0.001
     angle = 0
     hop_multiplier = 1
-    useless_steps = 0
     while True:
         Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
         result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
@@ -306,12 +310,47 @@ def run_bb_1ft_hop(pair, row):
         if max_x > best_x:
             best_x = max_x
             best_result = result
-            useless_steps = -1
-        else:
-            useless_steps += 1
         hop_multiplier = round(hop_multiplier + hop_step, 3)
-        if useless_steps > 10:
-            pass
+    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x hop mod', row)
+    return best_result
+
+# Finds correct hop for max of 6ft rise but it can shoot downwards
+def run_bb_1ft_hop_new(pair, row):
+    mass, energy = pair
+    best_result = BB_Class(mass, energy).run_sim()
+    best_x = 0
+    hop_step = 0.01
+    hop_multiplier = 1
+
+    maximum_height = ft2m(6)
+    minimum_height = ft2m(4.5)
+    angle = 0
+    angle_step = -0.1
+    angle_did_something = True
+    while angle_did_something:
+        angle_did_something = False
+        while True:
+            Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
+            result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
+            hop_multiplier = round(hop_multiplier + hop_step, 3)
+            max_y = result["max_y"]
+            if max_y > maximum_height:
+                break
+            points = result["points"]
+            with_upwards_velocity = [x for x in points if x[3][1] >= 0]
+            # If there are no points with upwards velocity, bb always fell so ignore this.
+            # This causes a big of 1x hop mod never being used, but this will never be the best hop mod anyway
+            min_y = min(x[1][1] for x in with_upwards_velocity)
+            # If it is dipping below minimum then further reducing the angle is useless
+            if min_y < minimum_height:
+                continue
+            max_x = result["max_x"]
+            if max_x > best_x:
+                angle_did_something = True
+                best_x = max_x
+                best_result = result
+            
+        angle = round(angle + angle_step, 1)
     Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x hop mod', row)
     return best_result
 
@@ -364,10 +403,13 @@ def main():
         for energy in ENERGIES:
             pairs.append((mass, energy))
     
-    with concurrent.futures.ProcessPoolExecutor() as pe:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=32) as pe:
         futures = []
         results = []
-        if not os.path.isfile("cache/results.json"):
+        if os.path.isfile("cache/results.json") and USE_CACHE:
+            with open("cache/results.json", "r") as f:
+                results = json.load(f)
+        else:
             progress_bar = Progress_Bar("Running sims", len(pairs))
             for i, pair in enumerate(pairs):
                 Progress_Bar.print(f'{pair} not started', i)
@@ -376,11 +418,9 @@ def main():
                 results.append(future.result())
                 progress_bar.update_progress()
             del(progress_bar)
+
             with open("cache/results.json", "w") as f:
                 json.dump(results, f)
-        else:
-            with open("cache/results.json", "r") as f:
-                results = json.load(f)
         # list(pe.map(run_bb_1ft_hop, pairs))
         #results = map(run_bb_1ft_hop, pairs)
         results = sorted(results, key=lambda result: result["energy"])
@@ -392,6 +432,7 @@ def main():
             series = [result for result in results if result["mass"] == mass]
             pe.submit(plot_graphs, series, mass, "M")
         #plot_spin_mods(results)
+        pe.shutdown(wait=True)
     print("Done")
 
 class Progress_Bar():

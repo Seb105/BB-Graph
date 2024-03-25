@@ -11,14 +11,16 @@ if os.name == 'nt': # Only if we are running on Windows
     from ctypes import windll
     k = windll.kernel32
     k.SetConsoleMode(k.GetStdHandle(-11), 7)
-sys.stdout.write(f"\x1b[8;{64};{100}t")
+sys.stdout.write(f"\x1b[8;{64};{100}t") # Set console size to 100x64
 
 RAD = 1.571
+## All at 15c
 AIR_DENSITY = 1.225
-AIR_DYNAMIC_VISCOSITY = 1.81e-5
+AIR_DYNAMIC_VISCOSITY = 1.802e-5
+AIR_KINEMATIC_VISCOSITY = AIR_DYNAMIC_VISCOSITY/AIR_DENSITY
 BB_DIAMETER = 5.95e-3
 BB_RADIUS = BB_DIAMETER/2
-SPHERE_DRAG_COEF = 0.47
+SPHERE_DRAG_COEF = 0.40
 SPHERE_FRONTAL_AREA = pi*BB_RADIUS**2
 TIMESTEP = 1/1000
 GRAVITY = 9.81
@@ -28,7 +30,11 @@ ENERGIES = (0.7, 0.8, 0.9, 1.0, 1.138, 1.486, 1.881, 2.322)
 MASSES =    (0.0002, 0.00025, 0.00028, 0.0003, 
             0.00032, 0.00035, 0.0004, 0.00045, 0.0005)
 CLAMP_AXES = True
-USE_CACHE = False
+USE_CACHE = True
+RPM_PER_RAD_PER_SEC = 9.5493
+
+GRAPH_DPI = 200
+FIG_SIZE_MOD = 0.75
 
 def remap(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -53,11 +59,35 @@ class BB_Class:
         # self.ballistic_coefficient = mass/(SPHERE_DRAG_COEF + SPHERE_FRONTAL_AREA)
         self.flight_time = 0
 
-    # def reynolds_number(self):
-    #     return (p*w*b**2)/u
+    def reynolds_number(self):
+        # https://en.wikipedia.org/wiki/Reynolds_number
+        surface_speed = BB_RADIUS * self.angular_velocity
+        flow_speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2) + surface_speed
+        return (AIR_DENSITY*flow_speed*BB_DIAMETER)/AIR_DYNAMIC_VISCOSITY
 
     def drag_coef(self):
-        return 24/self.reynolds_number()
+        # return 24/self.reynolds_number()#
+        #http://www.ecourses.ou.edu/cgi-bin/ebook.cgi?topic=fl&chap_sec=09.1&page=theory
+        sphere_drags = (
+            (0, 0.42),
+            (3e5, 0.39),
+            (3.5e5, 0.1),
+            (3.55e5, 0.09),
+            (3.6e5, 0.08),
+
+        )
+        reynolds_number = self.reynolds_number()
+        for i in range(len(sphere_drags)-1):
+            prev_reynolds = sphere_drags[i][0]
+            next_reynolds = sphere_drags[i+1][0]
+            if prev_reynolds <= reynolds_number <= next_reynolds:
+                prev_drag = sphere_drags[i][1]
+                next_drag = sphere_drags[i+1][1]
+                drag_coef = remap(reynolds_number, prev_reynolds, next_reynolds, prev_drag, next_drag)
+                return drag_coef
+        raise Exception(f"Reynolds number {reynolds_number} is out of range")
+        
+        
 
     def vortex_strength(self) -> float:
         return 2*pi*BB_RADIUS**2*self.angular_velocity
@@ -76,8 +106,13 @@ class BB_Class:
         # Gets initial hop spin for straight flight
         # Gets hop spin according to magnus effect https://www.fxsolver.com/browse/formulas/Magnus+effect
         F = mass * GRAVITY
-        G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
-        angular_velocity = G/(2*pi*BB_RADIUS**2)
+        # G = F/(BB_DIAMETER * AIR_DENSITY * component_velocity)
+        # angular_velocity = G/(2*pi*BB_RADIUS**2)
+
+
+        # F = (4/3) * (4*(pi**2)*(BB_RADIUS**3)*angular_velocity*AIR_DENSITY*speed)
+        # solve for angular_velocity
+        angular_velocity = (F*3)/(16*(pi**2)*(BB_RADIUS**3)*AIR_DENSITY*component_velocity)
         return angular_velocity
 
     def update_angular_velocity(self):
@@ -85,19 +120,39 @@ class BB_Class:
         shear_force = 2*pi*AIR_DYNAMIC_VISCOSITY * \
             self.angular_velocity*BB_DIAMETER*BB_RADIUS
         shear_torque = BB_RADIUS * shear_force
-        shear_delta = (shear_torque / self.moment_of_inerta) * TIMESTEP
 
         friction_torque = pi*self.angular_velocity**2*BB_RADIUS**4 * \
             BB_DIAMETER*AIR_DENSITY*SPHERE_DRAG_COEF
-        friction_delta = (friction_torque / self.moment_of_inerta) * TIMESTEP
-        self.angular_velocity = self.angular_velocity - shear_delta - friction_delta
+
+
+        total_torque = shear_torque + friction_torque
+        total_acceleration = total_torque/self.moment_of_inerta
+        total_delta = total_acceleration * TIMESTEP
+
+        self.angular_velocity = self.angular_velocity - total_delta
+
+    def update_angular_velocity_viscous(self):
+        # https://hobbieroth.blogspot.com/2018/01/the-viscous-torque-on-rotating-sphere.html
+        angular_velocity = self.angular_velocity
+        torque = 8*pi*AIR_DYNAMIC_VISCOSITY*BB_RADIUS**3*angular_velocity
+        angular_acceleration = torque/self.moment_of_inerta
+        angular_delta = angular_acceleration * TIMESTEP
+
+        self.angular_velocity = angular_velocity - angular_delta
 
     def calc_magnus_effect(self):
-        G = self.vortex_strength()
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
+        # G = self.vortex_strength()
         direction = atan2(self.velocity[0], self.velocity[1]) - RAD
-        F = AIR_DENSITY*speed*G*BB_DIAMETER
-        delta_speed = F/self.mass
+        # F_old = AIR_DENSITY*speed*G*BB_DIAMETER
+        angular_velocity = self.angular_velocity
+        # https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/ideal-lift-of-a-spinning-ball/
+        F_ideal = (4/3) * (4*(pi**2)*(BB_RADIUS**3)*angular_velocity*AIR_DENSITY*speed)
+        # https://www.grc.nasa.gov/www/k-12/VirtualAero/BottleRocket/airplane/beach.html
+        # V_r = 2 * pi * BB_RADIUS * angular_velocity
+        # G_c = 2 * pi * BB_RADIUS * V_r
+        # F_corrected = (AIR_DENSITY * G_c * speed) * BB_DIAMETER * (pi/4)
+        delta_speed = F_ideal/self.mass
         delta_X = sin(direction) * delta_speed
         delta_Y = cos(direction) * delta_speed
         # print("Magnus delta ", delta_X, delta_Y, velocity)
@@ -106,10 +161,11 @@ class BB_Class:
     def calc_drag(self) -> list:
         speed = sqrt(self.velocity[0]**2 + self.velocity[1]**2)
         direction = atan2(self.velocity[0], self.velocity[1])
+        drag_coef = SPHERE_DRAG_COEF #self.drag_coef()
         # https://en.wikipedia.org/wiki/Drag_equation
-        F = SPHERE_DRAG_COEF*0.5*AIR_DENSITY*(speed**2)*SPHERE_FRONTAL_AREA
-        # F = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
-        delta_speed = F/self.mass
+        force = drag_coef*0.5*AIR_DENSITY*(speed**2)*SPHERE_FRONTAL_AREA
+        # force = 6*pi*BB_RADIUS*AIR_DYNAMIC_VISCOSITY*speed # https://en.wikipedia.org/wiki/Stokes%27_law
+        delta_speed = force/self.mass
         delta_X = sin(direction) * delta_speed
         delta_Y = cos(direction) * delta_speed
         return [-delta_X, -delta_Y]
@@ -142,7 +198,7 @@ class BB_Class:
         max_x = 0
         max_y = 0
         while self.position[1] > 0:
-            self.update_angular_velocity()
+            self.update_angular_velocity_viscous()
             acceleration = self.update_velocity()
             self.update_position()
             max_x = max(max_x, self.position[0])
@@ -176,7 +232,7 @@ def get_plot_label(subject, result) -> str:
 
 
 def plot_graphs(series, datapoint, subject):
-    fig = plt.figure(dpi=200, figsize=(20, 15), tight_layout=True)
+    fig = plt.figure(dpi=GRAPH_DPI, figsize=(20 * FIG_SIZE_MOD, 15 * FIG_SIZE_MOD), tight_layout=True)
     if subject == "J":
         directory = f'graphs/energy/{datapoint}J.png'
         trajectory_title = f'Trajectories at {datapoint} joules for various bb weights'
@@ -197,7 +253,7 @@ def plot_graphs(series, datapoint, subject):
 
 
 def configure_line(z, line, subject, result):
-    line.set_lw(2)
+    line.set_lw(2*FIG_SIZE_MOD)
     line.set_alpha(0.5)
     line.set_ls('--')
     line.set_label(get_plot_label(subject, result))
@@ -218,13 +274,13 @@ def plot_trajectory(fig, series, title, subject):
         trajectory = ax.plot(positions_x, positions_y)[0]
         configure_line(i, trajectory, subject, result)
     if CLAMP_AXES:
-        ax.set_xlim(xmin=0, xmax=275)
+        ax.set_xlim(xmin=0, xmax=310)
         ax.set_ylim(ymin=0, ymax=6.5)
     secxax = ax.secondary_xaxis('top', functions=(ft2m, m2ft))
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secxax.set_xlabel("Distance (m)")
     secyax.set_ylabel("Height (m)")
-    ax.legend(loc='lower left' if CLAMP_AXES else 'upper left')
+    ax.legend(loc='lower left')
 
 
 def plot_time_distance(fig, series, title, subject):
@@ -241,7 +297,7 @@ def plot_time_distance(fig, series, title, subject):
         configure_line(len(series)-i, trajectory, subject, result)
     if CLAMP_AXES:
         ax.set_xlim(xmin=0, xmax=1.8)
-        ax.set_ylim(ymin=0, ymax=275)
+        ax.set_ylim(ymin=0, ymax=310)
     secyax = ax.secondary_yaxis('right', functions=(ft2m, m2ft))
     secyax.set_ylabel("Distance Travelled (m)")
     ax.legend(loc='lower right')
@@ -267,9 +323,9 @@ def plot_time_velocity(fig, series, title, subject):
     ax.legend(loc='upper right')
 
 def plot_spin_mods(results):
-    fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(15,10))
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(15*FIG_SIZE_MOD,10*FIG_SIZE_MOD))
     fig.tight_layout()
-    fig.set_dpi(200)
+    fig.set_dpi(GRAPH_DPI)
     ax.view_init(30, -30)
 
     masses = np.asarray([result["mass"]*1000 for result in results])
@@ -292,20 +348,20 @@ def plot_spin_mods(results):
 
 
 # finds correct hop for max of 6ft rise
-def run_bb_1ft_hop(pair, row):
+def run_bb_custom_hop(pair, row, max_ft = 6):
     mass, energy = pair
-    bb = BB_Class(mass, energy)
+    angle = 0
+    bb = BB_Class(mass, energy, angle)
     best_result = bb.run_sim()
     best_x = best_result["max_x"]
     hop_step = 0.001
-    angle = 0
     hop_multiplier = 1
     while True:
         Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
         result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
         max_x = result["max_x"]
         max_y = result["max_y"]
-        if max_y > ft2m(6):
+        if max_y > ft2m(max_ft):
             break
         if max_x > best_x:
             best_x = max_x
@@ -321,7 +377,6 @@ def run_bb_1ft_hop_new(pair, row):
     best_x = 0
     hop_step = 0.01
     hop_multiplier = 1
-
     maximum_height = ft2m(6)
     minimum_height = ft2m(4.5)
     angle = 0
@@ -339,7 +394,7 @@ def run_bb_1ft_hop_new(pair, row):
             points = result["points"]
             with_upwards_velocity = [x for x in points if x[3][1] >= 0]
             # If there are no points with upwards velocity, bb always fell so ignore this.
-            # This causes a big of 1x hop mod never being used, but this will never be the best hop mod anyway
+            # This causes a bug of 1x hop mod never being used, but this will never be the best hop mod anyway
             min_y = min(x[1][1] for x in with_upwards_velocity)
             # If it is dipping below minimum then further reducing the angle is useless
             if min_y < minimum_height:
@@ -352,42 +407,6 @@ def run_bb_1ft_hop_new(pair, row):
             
         angle = round(angle + angle_step, 1)
     Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x hop mod', row)
-    return best_result
-
-# finds correct hop and shooting angle for maximum distance. Currently non functional
-def run_bb_max_dist(pair, row):
-    mass, energy = pair
-    bb = BB_Class(mass, energy)
-    best_result = bb.run_sim()
-    best_x = 0
-    angle_step = 0.001
-    hop_step = 0.001
-    angle = 0
-    hop_multiplier = 1
-    useless_angle_steps = 0
-    while True:
-        hop_multiplier = 1
-        useless_hop_steps = 0
-        best_x = 0
-        while True:
-            Progress_Bar.print(f'{round(mass*1000, 2)}g, {energy}J, {angle}deg, {round(hop_multiplier, 2)}x {round(best_result["max_x"], 3)}m', row)
-            result = BB_Class(mass, energy, angle, hop_multiplier).run_sim()
-            max_x = result["max_x"]
-            if max_x > best_x:
-                best_x = max_x
-                best_result = result
-                useless_angle_steps = -1
-                useless_hop_steps = 0
-            else:
-                useless_hop_steps += 1
-            if useless_hop_steps > 10:
-                break
-            hop_multiplier = round(hop_multiplier + hop_step, 3)
-        useless_angle_steps += 1
-        angle = round(angle + angle_step, 3)
-        if useless_angle_steps > 10:
-            break
-    Progress_Bar.print(f'Done {mass*1000}g, {energy}j with {best_result["angle"]}deg and {best_result["hop_mod"]}x', row)
     return best_result
 
 def main():
@@ -413,7 +432,7 @@ def main():
             progress_bar = Progress_Bar("Running sims", len(pairs))
             for i, pair in enumerate(pairs):
                 Progress_Bar.print(f'{pair} not started', i)
-                futures.append(pe.submit(run_bb_1ft_hop, pair, i))
+                futures.append(pe.submit(run_bb_custom_hop, pair, i))
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
                 progress_bar.update_progress()
@@ -481,6 +500,7 @@ class Progress_Bar():
     def __del__(self):
         print("")
         print(f"Done in {int(time.time()-self.start_time)}s")
+
 
 
 if __name__ == "__main__":
